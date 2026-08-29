@@ -30,6 +30,9 @@ export class InvalidTransitionError extends Error {
 }
 
 export interface TransitionOptions {
+  // Scoped to exactly the evaluating -> repaired edge (see assertValidTransition below);
+  // ignored for every other transition, so it can't be used to smuggle through an
+  // otherwise-illegal status change.
   isRepairVersion?: boolean;
 }
 

@@ -22,6 +22,11 @@ describe("assertValidTransition", () => {
     expect(() => assertValidTransition("cannot_commit", "evaluating")).toThrow(InvalidTransitionError);
   });
 
+  it("treats repaired and escalated as terminal — no state un-terminals itself", () => {
+    expect(() => assertValidTransition("repaired", "evaluating")).toThrow(InvalidTransitionError);
+    expect(() => assertValidTransition("escalated", "evaluating")).toThrow(InvalidTransitionError);
+  });
+
   it("only allows evaluating -> repaired when explicitly processing a repair version", () => {
     expect(() => assertValidTransition("evaluating", "repaired")).toThrow(InvalidTransitionError);
     expect(() => assertValidTransition("evaluating", "repaired", { isRepairVersion: true })).not.toThrow();
