@@ -81,6 +81,9 @@ export async function releaseDeliverySlot(db: PrismaClient, reservationId: strin
   return db.$transaction(async (tx) => {
     const reservation = await tx.reservation.findUniqueOrThrow({ where: { id: reservationId } });
     if (reservation.status !== "held" && reservation.status !== "committed") return reservation;
+    // resourceRef is "PLAN:<planId>" — 2 parts; other domains use 3, don't copy this
+    // arity blind. A mismatched split() yields `undefined` fields that Prisma silently
+    // drops from `where` instead of erroring, turning a bug into an unintended broad update.
     const [, planId] = reservation.resourceRef.split(":");
     await tx.deliveryPlanOption.updateMany({ where: { planId }, data: { capacityRemaining: { increment: reservation.quantityMinor ?? 0 } } });
     return tx.reservation.update({ where: { id: reservationId }, data: { status: "released" } });

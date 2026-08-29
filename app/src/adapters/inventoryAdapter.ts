@@ -85,6 +85,10 @@ export async function releaseInventoryHold(db: PrismaClient, reservationId: stri
   return db.$transaction(async (tx) => {
     const reservation = await tx.reservation.findUniqueOrThrow({ where: { id: reservationId } });
     if (reservation.status !== "held") return reservation;
+    // resourceRef is "SKU:<sku>:<warehouseId>" — 3 parts. Other domains use fewer;
+    // don't copy this arity onto a resourceRef shaped differently, since a mismatched
+    // split() yields `undefined` fields that Prisma silently drops from `where` instead
+    // of erroring, turning a bug into an unintended broad update.
     const [, sku, warehouseId] = reservation.resourceRef.split(":");
     await tx.inventoryPosition.updateMany({
       where: { sku, warehouseId },

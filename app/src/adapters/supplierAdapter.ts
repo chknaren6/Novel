@@ -90,6 +90,10 @@ export async function cancelSupplierOptionHold(db: PrismaClient, reservationId: 
   return db.$transaction(async (tx) => {
     const reservation = await tx.reservation.findUniqueOrThrow({ where: { id: reservationId } });
     if (reservation.status !== "held" && reservation.status !== "committed") return reservation;
+    // resourceRef is "SUPPLIER:<supplierId>:<sku>" — 3 parts. Other domains use fewer;
+    // don't copy this arity onto a resourceRef shaped differently, since a mismatched
+    // split() yields `undefined` fields that Prisma silently drops from `where` instead
+    // of erroring, turning a bug into an unintended broad update.
     const [, supplierId, sku] = reservation.resourceRef.split(":");
     await tx.supplierOption.updateMany({ where: { supplierId, sku }, data: { availableQuantity: { increment: reservation.quantityMinor ?? 0 } } });
     return tx.reservation.update({ where: { id: reservationId }, data: { status: "released" } });

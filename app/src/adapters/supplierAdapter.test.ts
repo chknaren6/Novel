@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { testDb, resetTestDb } from "@/lib/testDb";
-import { holdSupplierOption } from "./supplierAdapter";
+import { holdSupplierOption, cancelSupplierOptionHold } from "./supplierAdapter";
 import { ToolError } from "@/lib/types";
 import { deriveIdempotencyKey } from "@/policy/idempotency";
 
@@ -44,6 +44,31 @@ describe("holdSupplierOption", () => {
     await expect(
       holdSupplierOption(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", supplierId: "VEND-2003", sku: "MAT-10001", quantity: 151, maxUnitCostMinor: 300_000, maxLeadDays: 21, ttlSeconds: 900 }),
     ).rejects.toThrow(ToolError);
+  });
+
+  it("releases a held reservation and restores availability", async () => {
+    const dealCase = await seedCase();
+    const reservation = await holdSupplierOption(testDb, {
+      caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1",
+      supplierId: "VEND-2003", sku: "MAT-10001", quantity: 80,
+      maxUnitCostMinor: 300_000, maxLeadDays: 21, ttlSeconds: 900,
+    });
+    await cancelSupplierOptionHold(testDb, reservation.id);
+    const option = await testDb.supplierOption.findFirstOrThrow({ where: { supplierId: "VEND-2003", sku: "MAT-10001" } });
+    expect(option.availableQuantity).toBe(151);
+  });
+
+  it("does not double-restore availability when released twice", async () => {
+    const dealCase = await seedCase();
+    const reservation = await holdSupplierOption(testDb, {
+      caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1",
+      supplierId: "VEND-2003", sku: "MAT-10001", quantity: 80,
+      maxUnitCostMinor: 300_000, maxLeadDays: 21, ttlSeconds: 900,
+    });
+    await cancelSupplierOptionHold(testDb, reservation.id);
+    await cancelSupplierOptionHold(testDb, reservation.id);
+    const option = await testDb.supplierOption.findFirstOrThrow({ where: { supplierId: "VEND-2003", sku: "MAT-10001" } });
+    expect(option.availableQuantity).toBe(151);
   });
 
   it("does not double-decrement when two callers race with the same idempotency key", async () => {

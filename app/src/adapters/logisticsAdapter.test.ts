@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { testDb, resetTestDb } from "@/lib/testDb";
-import { holdDeliverySlot } from "./logisticsAdapter";
+import { holdDeliverySlot, releaseDeliverySlot } from "./logisticsAdapter";
 import { ToolError } from "@/lib/types";
 import { deriveIdempotencyKey } from "@/policy/idempotency";
 
@@ -41,6 +41,23 @@ describe("holdDeliverySlot", () => {
     await expect(
       holdDeliverySlot(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", planId: "PLAN-MISSING", quantity: 1, ttlSeconds: 900 }),
     ).rejects.toThrow(ToolError);
+  });
+
+  it("releases a held reservation and restores capacity", async () => {
+    const dealCase = await seedCase();
+    const reservation = await holdDeliverySlot(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", planId: "RT-BLR-HYD", quantity: 150, ttlSeconds: 900 });
+    await releaseDeliverySlot(testDb, reservation.id);
+    const plan = await testDb.deliveryPlanOption.findUniqueOrThrow({ where: { planId: "RT-BLR-HYD" } });
+    expect(plan.capacityRemaining).toBe(350);
+  });
+
+  it("does not double-restore capacity when released twice", async () => {
+    const dealCase = await seedCase();
+    const reservation = await holdDeliverySlot(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", planId: "RT-BLR-HYD", quantity: 150, ttlSeconds: 900 });
+    await releaseDeliverySlot(testDb, reservation.id);
+    await releaseDeliverySlot(testDb, reservation.id);
+    const plan = await testDb.deliveryPlanOption.findUniqueOrThrow({ where: { planId: "RT-BLR-HYD" } });
+    expect(plan.capacityRemaining).toBe(350);
   });
 
   it("does not double-decrement when two callers race with the same idempotency key", async () => {
