@@ -1,0 +1,257 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Company {
+  id        String     @id @default(uuid())
+  name      String
+  createdAt DateTime   @default(now())
+  customers Customer[]
+  cases     DealCase[]
+}
+
+model Operator {
+  id    String @id @default(uuid())
+  email String @unique
+  name  String
+}
+
+model Customer {
+  id                      String   @id @default(uuid())
+  companyId               String
+  company                 Company  @relation(fields: [companyId], references: [id])
+  name                    String
+  creditLimitMinor        Int
+  currentExposureMinor    Int
+  overdueReceivablesMinor Int
+  // Stored as a JSON string (SQLite has no native Json type): JSON.stringify on write, JSON.parse on read.
+  allowedPaymentTerms     String
+  policyVersion           String
+}
+
+model InventoryPosition {
+  id                 String    @id @default(uuid())
+  sku                String
+  warehouseId        String
+  availableQuantity  Int
+  earliestHoldExpiry DateTime?
+}
+
+model SupplierOption {
+  id                String @id @default(uuid())
+  supplierId        String
+  sku               String
+  availableQuantity Int
+  unitCostMinor     Int
+  leadDays          Int
+  optionTtlSeconds  Int
+  status            String
+}
+
+model DeliveryPlanOption {
+  id                String   @id @default(uuid())
+  planId            String   @unique
+  originWarehouseId String
+  destinationId     String
+  deliveredQuantity Int
+  deliveryDate      DateTime
+  costMinor         Int
+  splitShipment     Boolean
+  capacityRemaining Int
+}
+
+model DealCase {
+  id                 String              @id @default(uuid())
+  companyId          String
+  company            Company             @relation(fields: [companyId], references: [id])
+  customerId         String
+  fixtureId          String?
+  activeTermsVersion Int
+  status             String
+  createdBy          String
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  termsVersions      TermsVersion[]
+  decisions          DomainDecision[]
+  reservations       Reservation[]
+  certificates       CommitCertificate[]
+  receipts           ActionReceipt[]
+  events             CaseEvent[]
+  counteroffers      Counteroffer[]
+}
+
+model TermsVersion {
+  id               String   @id @default(uuid())
+  caseId           String
+  case             DealCase @relation(fields: [caseId], references: [id])
+  version          Int
+  parentVersion    Int?
+  source           String
+  termsHash        String
+  sku              String
+  quantity         Int
+  currency         String   @default("INR")
+  totalValueMinor  Int
+  discountBps      Int
+  paymentTerms     String
+  deliveryDeadline DateTime
+  createdAt        DateTime @default(now())
+
+  @@unique([caseId, version])
+}
+
+model DomainDecision {
+  id               String   @id @default(uuid())
+  caseId           String
+  case             DealCase @relation(fields: [caseId], references: [id])
+  caseVersion      Int
+  termsHash        String
+  role             String
+  decision         String
+  // Stored as a JSON string (SQLite has no native Json type): JSON.stringify on write, JSON.parse on read.
+  payload          String
+  // Stored as a JSON string (SQLite has no native Json type): JSON.stringify on write, JSON.parse on read.
+  evidenceRefs     String
+  expiresAt        DateTime
+  modelId          String
+  gatewayRequestId String?
+  traceId          String
+  createdAt        DateTime @default(now())
+}
+
+model Reservation {
+  id             String   @id @default(uuid())
+  caseId         String
+  case           DealCase @relation(fields: [caseId], references: [id])
+  caseVersion    Int
+  termsHash      String
+  domain         String
+  resourceRef    String
+  quantityMinor  Int?
+  limitMinor     Int?
+  status         String
+  policyVersion  String
+  expiresAt      DateTime
+  idempotencyKey String   @unique
+  receiptId      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model CommitCertificate {
+  id                      String    @id @default(uuid())
+  caseId                  String
+  case                    DealCase  @relation(fields: [caseId], references: [id])
+  caseVersion             Int
+  termsHash               String
+  // Stored as a JSON string (SQLite has no native Json type): JSON.stringify on write, JSON.parse on read.
+  reservationIds          String
+  // Stored as a JSON string (SQLite has no native Json type): JSON.stringify on write, JSON.parse on read.
+  policyVersions          String
+  validUntil              DateTime
+  status                  String
+  supersedesCertificateId String?
+  certificateHash         String
+  createdAt               DateTime  @default(now())
+  consumedAt              DateTime?
+  brokenAt                DateTime?
+}
+
+model ActionReceipt {
+  id                 String   @id @default(uuid())
+  caseId             String
+  case               DealCase @relation(fields: [caseId], references: [id])
+  caseVersion        Int
+  actionType         String
+  resourceRef        String
+  idempotencyKey     String   @unique
+  requestHash        String
+  status             String
+  provider           String
+  providerReceiptRef String?
+  // Stored as a JSON string (SQLite has no native Json type): JSON.stringify on write, JSON.parse on read.
+  responsePayload    String
+  attemptCount       Int      @default(1)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model CaseEvent {
+  id          String   @id @default(uuid())
+  caseId      String
+  case        DealCase @relation(fields: [caseId], references: [id])
+  sequence    Int
+  eventType   String
+  caseVersion Int
+  actorType   String
+  actorRef    String
+  // Stored as a JSON string (SQLite has no native Json type): JSON.stringify on write, JSON.parse on read.
+  payload     String
+  traceId     String
+  createdAt   DateTime @default(now())
+
+  @@unique([caseId, sequence])
+}
+
+model Counteroffer {
+  id                   String    @id @default(uuid())
+  caseId               String
+  case                 DealCase  @relation(fields: [caseId], references: [id])
+  sourceTermsVersion   Int
+  proposedTermsVersion Int
+  tokenHash            String    @unique
+  status               String
+  expiresAt            DateTime
+  respondedAt          DateTime?
+  createdAt            DateTime  @default(now())
+}
+
+// Sandbox "production-shaped" adapters (02-TECHNICAL-SPEC.md "Sandbox ERP/CRM,
+// supplier, and logistics adapters backed by Postgres tables"). These are commit-side
+// effects, distinct from the reservation tables above.
+model SandboxOrder {
+  id              String   @id @default(uuid())
+  caseId          String
+  certificateId   String
+  sku             String
+  quantity        Int
+  totalValueMinor Int
+  status          String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model CrmStageEvent {
+  id        String   @id @default(uuid())
+  caseId    String
+  stage     String
+  note      String
+  createdAt DateTime @default(now())
+}
+
+model StripeCheckoutMock {
+  id              String   @id @default(uuid())
+  caseId          String
+  certificateId   String
+  amountMinor     Int
+  status          String
+  stripeSessionId String   @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model OutboxMessage {
+  id            String   @id @default(uuid())
+  caseId        String
+  messageType   String
+  certificateId String?
+  correctsId    String?
+  // Stored as a JSON string (SQLite has no native Json type): JSON.stringify on write, JSON.parse on read.
+  payload       String
+  createdAt     DateTime @default(now())
+}
