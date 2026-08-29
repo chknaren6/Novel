@@ -7,3 +7,4 @@ test-*.db-journal
 .env.local
 *.tsbuildinfo
 submission/
+next-env.d.ts
