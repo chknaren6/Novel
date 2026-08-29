@@ -27,11 +27,31 @@ export async function expireCheckout(db: PrismaClient, checkoutId: string) {
   const checkout = await db.stripeCheckoutMock.findUniqueOrThrow({ where: { id: checkoutId } });
   if (checkout.status === "expired") return checkout;
   if (checkout.status === "completed") {
+    // This is a state-transition conflict, not a provider outage — POLICY_VIOLATION is
+    // the closest fit in the current error taxonomy.
     throw new ToolError(
-      "PROVIDER_UNAVAILABLE",
+      "POLICY_VIOLATION",
       "Cannot expire a completed test checkout; this build has no idempotent test-mode refund path (04-DATA-AND-STATE-SPEC.md)",
       false,
     );
   }
-  return db.stripeCheckoutMock.update({ where: { id: checkoutId }, data: { status: "expired" } });
+  // Atomic guarded update, mirroring inventoryAdapter.ts's compare-and-swap pattern:
+  // the plain read above is not the source of truth for the write. If the checkout
+  // transitions to "completed" between the read and this update (a real commit
+  // workflow racing this call), the guard stops the update from silently clobbering
+  // "completed" back to "expired".
+  const updated = await db.stripeCheckoutMock.updateMany({
+    where: { id: checkoutId, status: { not: "completed" } },
+    data: { status: "expired" },
+  });
+  if (updated.count === 0) {
+    // Lost the race: the row flipped to "completed" between our read above and this
+    // write. Surface that as the same conflict we'd have thrown had we seen it first.
+    throw new ToolError(
+      "POLICY_VIOLATION",
+      `Cannot expire checkout ${checkoutId}: it was completed concurrently`,
+      false,
+    );
+  }
+  return db.stripeCheckoutMock.findUniqueOrThrow({ where: { id: checkoutId } });
 }

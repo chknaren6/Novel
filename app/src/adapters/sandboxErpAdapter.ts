@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { ToolError } from "@/lib/types";
 
 export interface CreateSandboxOrderInput {
   caseId: string;
@@ -13,11 +14,26 @@ export async function createSandboxOrder(db: PrismaClient, input: CreateSandboxO
 }
 
 export async function markSandboxOrderRepairPending(db: PrismaClient, caseId: string) {
-  return db.sandboxOrder.updateMany({ where: { caseId }, data: { status: "repair_pending" } });
+  // A case has exactly one sandbox order per the domain model, so count must be exactly
+  // 1: zero matches means a typo'd caseId or an order that was never created (a silent
+  // no-op that would otherwise look like success); more than one would mean this update
+  // silently touched rows it shouldn't have.
+  const result = await db.sandboxOrder.updateMany({ where: { caseId }, data: { status: "repair_pending" } });
+  if (result.count !== 1) {
+    throw new ToolError("RESOURCE_UNAVAILABLE", `Expected exactly one sandbox order for case ${caseId}, matched ${result.count}`, false);
+  }
+  return result;
 }
 
 export async function markSandboxOrderRepaired(db: PrismaClient, caseId: string, newCertificateId: string) {
-  return db.sandboxOrder.updateMany({ where: { caseId }, data: { status: "repaired", certificateId: newCertificateId } });
+  // Same one-order-per-case invariant as markSandboxOrderRepairPending above: guard
+  // against a typo'd caseId silently no-opping or an unexpected multi-row match
+  // silently mass-updating.
+  const result = await db.sandboxOrder.updateMany({ where: { caseId }, data: { status: "repaired", certificateId: newCertificateId } });
+  if (result.count !== 1) {
+    throw new ToolError("RESOURCE_UNAVAILABLE", `Expected exactly one sandbox order for case ${caseId}, matched ${result.count}`, false);
+  }
+  return result;
 }
 
 export interface UpdateCrmStageInput {
