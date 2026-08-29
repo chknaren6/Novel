@@ -2,10 +2,11 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { ToolError, type PaymentTerms } from "@/lib/types";
 import { createHeldReservation } from "@/reservations/reservationStore";
 import { deriveIdempotencyKey } from "@/policy/idempotency";
-import { evaluateCreditPolicy } from "@/policy/credit";
+import { evaluateCreditPolicy, type CreditPolicyCode } from "@/policy/credit";
 import { fromJsonColumn } from "@/lib/json-column";
 
 const CREDIT_POLICY_VERSION = "credit-policy-v1";
+const CREDIT_LIMIT_EXCEEDED_CODE: CreditPolicyCode = "CREDIT_LIMIT_EXCEEDED";
 
 export interface HoldCreditEnvelopeInput {
   caseId: string;
@@ -18,8 +19,8 @@ export interface HoldCreditEnvelopeInput {
 }
 
 // The server recomputes exposure and rejects mismatched policy or insufficient
-// capacity (05-TOOL-CONTRACTS.md "hold_credit_envelope") — the model's decision is
-// never trusted as the exposure calculation.
+// capacity (05-TOOL-CONTRACTS.md "hold_credit_envelope") — the model's exposure
+// calculation is never trusted.
 export async function holdCreditEnvelope(db: PrismaClient, input: HoldCreditEnvelopeInput) {
   const idempotencyKey = deriveIdempotencyKey({
     caseId: input.caseId,
@@ -38,7 +39,10 @@ export async function holdCreditEnvelope(db: PrismaClient, input: HoldCreditEnve
       const alreadyHeld = await tx.reservation.findUnique({ where: { idempotencyKey } });
       if (alreadyHeld) return alreadyHeld;
 
-      const customer = await tx.customer.findUniqueOrThrow({ where: { id: input.customerId } });
+      const customer = await tx.customer.findUnique({ where: { id: input.customerId } });
+      if (!customer) {
+        throw new ToolError("RESOURCE_UNAVAILABLE", `Customer ${input.customerId} not found`, false);
+      }
       const policyResult = evaluateCreditPolicy({
         creditLimitMinor: customer.creditLimitMinor,
         currentExposureMinor: customer.currentExposureMinor,
@@ -50,7 +54,7 @@ export async function holdCreditEnvelope(db: PrismaClient, input: HoldCreditEnve
         newExposureMinor: input.exposureMinor,
       });
       if (!policyResult.passed) {
-        throw new ToolError("POLICY_VIOLATION", `Credit policy rejected exposure: ${policyResult.code}`, false, [`CUSTOMER:${input.customerId}`]);
+        throw new ToolError("POLICY_VIOLATION", `Credit policy rejected exposure: ${policyResult.code}`, false);
       }
 
       // Atomic compare-and-swap on the row actually being mutated, not just the read
@@ -69,7 +73,7 @@ export async function holdCreditEnvelope(db: PrismaClient, input: HoldCreditEnve
         data: { currentExposureMinor: { increment: input.exposureMinor } },
       });
       if (updated.count === 0) {
-        throw new ToolError("POLICY_VIOLATION", "Credit policy rejected exposure: CREDIT_LIMIT_EXCEEDED", false, [`CUSTOMER:${input.customerId}`]);
+        throw new ToolError("POLICY_VIOLATION", `Credit policy rejected exposure: ${CREDIT_LIMIT_EXCEEDED_CODE}`, false);
       }
 
       return createHeldReservation(tx, {

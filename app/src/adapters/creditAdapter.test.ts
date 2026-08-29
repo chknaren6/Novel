@@ -56,6 +56,13 @@ describe("holdCreditEnvelope", () => {
     ).rejects.toThrow(ToolError);
   });
 
+  it("refuses a customerId that does not exist", async () => {
+    const { dealCase } = await seedCase();
+    await expect(
+      holdCreditEnvelope(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", customerId: "CUST-DOES-NOT-EXIST", paymentTerms: "ADVANCE_30", exposureMinor: 80_000_000, ttlSeconds: 600 }),
+    ).rejects.toThrow(ToolError);
+  });
+
   it("is idempotent under retry with the same case, version, and resource", async () => {
     const { dealCase, customer } = await seedCase();
     const args = { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", customerId: customer.id, paymentTerms: "ADVANCE_30" as const, exposureMinor: 80_000_000, ttlSeconds: 600 };
@@ -112,6 +119,60 @@ describe("holdCreditEnvelope", () => {
 
     expect(result).toBe(winnerRow);
     expect(findUnique).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects via the updateMany guard when a concurrent racer already consumed the headroom", async () => {
+    // evaluateCreditPolicy is a plain boolean/arithmetic check against a snapshot read
+    // before the transaction's own atomic updateMany guard runs, so a customer row that
+    // would pass evaluateCreditPolicy can still fail the updateMany guard if another
+    // transaction consumed the headroom in between. Under SQLite's serialized
+    // transactions this can't actually happen through the real DB, so — per the code
+    // review that asked for this coverage — it's exercised here with a stubbed client
+    // that runs the real transaction body against fake `tx` methods instead.
+    const idempotencyKey = deriveIdempotencyKey({
+      caseId: "CASE-1",
+      caseVersion: 1,
+      actionType: "hold_credit_envelope",
+      resourceRef: "CUSTOMER:CUST-1",
+    });
+    const customerRow = {
+      id: "CUST-1",
+      creditLimitMinor: 200_000_000,
+      currentExposureMinor: 0,
+      overdueReceivablesMinor: 0,
+      allowedPaymentTerms: toJsonColumn(["ADVANCE_30"]),
+    };
+
+    const fakeTx = {
+      reservation: { findUnique: vi.fn().mockResolvedValue(null) },
+      customer: {
+        findUnique: vi.fn().mockResolvedValue(customerRow),
+        // Simulates a concurrent racer having already consumed the headroom between
+        // this transaction's read of `customerRow` and its own updateMany guard.
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+
+    const fakeDb = {
+      reservation: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: vi.fn().mockImplementation((cb: (tx: unknown) => unknown) => cb(fakeTx)),
+    } as unknown as PrismaClient;
+
+    const args = {
+      caseId: "CASE-1", caseVersion: 1, termsHash: "hash-1",
+      customerId: customerRow.id, paymentTerms: "ADVANCE_30" as const, exposureMinor: 80_000_000, ttlSeconds: 600,
+    };
+
+    let thrown: unknown;
+    try {
+      await holdCreditEnvelope(fakeDb, args);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ToolError);
+    expect((thrown as ToolError).code).toBe("POLICY_VIOLATION");
+    expect((thrown as ToolError).message).toContain("CREDIT_LIMIT_EXCEEDED");
   });
 
   it("releases a held reservation and restores exposure", async () => {
