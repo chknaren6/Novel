@@ -26,7 +26,9 @@ export interface RoleToolCallLog {
 
 export interface RoleRunResult {
   output: RoleModelOutput;
-  toolCalls: RoleToolCallLog[];
+  // Tuple union (not RoleToolCallLog[]) so "at most one tool call per runRole" is
+  // enforced by the type system for any implementation, not just documented in prose.
+  toolCalls: [] | [RoleToolCallLog];
   modelId: string;
   gatewayRequestId: string | null;
 }
@@ -34,6 +36,8 @@ export interface RoleRunResult {
 // A role invokes at most one bounded reasoning/tool round (03-AGENT-ARCHITECTURE.md
 // "Cost and latency controls"). Every implementation of this interface — real or fake —
 // must therefore call each tool's `execute` at most once per `runRole` invocation.
+// Implementations must throw `ToolError` (not a raw parsing/validation error type) for
+// both a forbidden-tool call and schema-invalid model output.
 export interface ModelGateway {
   runRole(input: RoleRunInput): Promise<RoleRunResult>;
 }

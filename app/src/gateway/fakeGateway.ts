@@ -22,9 +22,11 @@ export class FakeModelGateway implements ModelGateway {
 
   async runRole(input: RoleRunInput): Promise<RoleRunResult> {
     const { toolCall, output } = this.script(input);
-    const toolCalls: RoleRunResult["toolCalls"] = [];
+    let toolCalls: RoleRunResult["toolCalls"] = [];
 
     if (toolCall) {
+      // Assumes tool names are unique across readTools and mutationTool for a given
+      // role invocation; if that invariant is ever violated, the read tool silently wins.
       const tool =
         input.readTools.find((t) => t.name === toolCall.name) ??
         (input.mutationTool?.name === toolCall.name ? input.mutationTool : undefined);
@@ -32,11 +34,16 @@ export class FakeModelGateway implements ModelGateway {
         throw new ToolError("FORBIDDEN_TOOL", `Role "${input.role}" attempted to call unregistered tool "${toolCall.name}"`, false);
       }
       const result = await tool.execute(toolCall.args);
-      toolCalls.push({ name: toolCall.name, args: toolCall.args, result });
+      toolCalls = [{ name: toolCall.name, args: toolCall.args, result }];
+    }
+
+    const parsed = RoleModelOutputSchema.safeParse(output);
+    if (!parsed.success) {
+      throw new ToolError("INVALID_INPUT", `Scripted role output failed validation: ${parsed.error.message}`, false);
     }
 
     return {
-      output: RoleModelOutputSchema.parse(output),
+      output: parsed.data,
       toolCalls,
       modelId: "fake-model-v1",
       gatewayRequestId: null,

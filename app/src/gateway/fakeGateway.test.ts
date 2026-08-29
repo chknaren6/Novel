@@ -18,14 +18,17 @@ function baseInput(overrides: Partial<RoleRunInput> = {}): RoleRunInput {
 
 describe("FakeModelGateway", () => {
   it("executes the scripted tool call exactly once and returns its result", async () => {
+    const execute = vi.fn().mockResolvedValue({ reservationId: "RES-1" });
+    const mutationTool = { name: "hold_inventory", description: "hold stock", parametersSchema: {}, execute };
     const gateway = new FakeModelGateway(() => ({
       toolCall: { name: "hold_inventory", args: { quantity: 199 } },
       output: { decision: "approve", constraints: [], reservationRequests: [], counterterms: [], evidenceRefs: ["EVID-1"], explanation: "Held." },
     }));
-    const result = await gateway.runRole(baseInput());
+    const result = await gateway.runRole(baseInput({ mutationTool }));
     expect(result.toolCalls).toHaveLength(1);
     expect(result.toolCalls[0]!.result).toEqual({ reservationId: "RES-1" });
     expect(result.output.decision).toBe("approve");
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it("throws FORBIDDEN_TOOL when the script names a tool that was not offered", async () => {
@@ -41,6 +44,16 @@ describe("FakeModelGateway", () => {
       toolCall: null,
       output: { decision: "maybe" as never, constraints: [], reservationRequests: [], counterterms: [], evidenceRefs: [], explanation: "" },
     }));
-    await expect(gateway.runRole(baseInput({ mutationTool: null }))).rejects.toThrow();
+
+    await expect(gateway.runRole(baseInput({ mutationTool: null }))).rejects.toThrow(ToolError);
+
+    let thrown: unknown;
+    try {
+      await gateway.runRole(baseInput({ mutationTool: null }));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ToolError);
+    expect((thrown as ToolError).code).toBe("INVALID_INPUT");
   });
 });
