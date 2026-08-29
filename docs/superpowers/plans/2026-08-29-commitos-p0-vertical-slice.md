@@ -714,7 +714,7 @@ export function newId(prefix: string): string {
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `cd app && npx vitest run src/lib/money.test.ts src/lib/hash.test.ts`
-Expected: PASS (5 tests).
+Expected: PASS (7 tests).
 
 - [ ] **Step 7: Commit**
 
