@@ -349,7 +349,14 @@ export async function compensateCommitment(db: PrismaClient, input: CompensateCo
       actionType: "logistics.release_slot",
       resourceRef: reservation.resourceRef,
       provider: "logistics",
-      idempotencyKey: key("logistics.release_slot", reservation.resourceRef),
+      // Unlike every other receipted action in this file (which key off a shared
+      // resource like a certificate or case id, where true duplicates ARE meant to
+      // collide and dedupe), each affected logistics RESERVATION here represents a
+      // distinct compensation event even when multiple reservations share the same
+      // underlying planId — keying off the shared plan resourceRef would silently
+      // collapse two real compensations into one, permanently losing the second
+      // reservation's capacity credit.
+      idempotencyKey: key("logistics.release_slot", `RESERVATION:${reservation.id}`),
       requestHash: input.brokenCertificateId,
       execute: async () => {
         // resourceRef is "PLAN:<planId>" — 2 parts; other domains use 3, don't copy

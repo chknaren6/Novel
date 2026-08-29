@@ -347,9 +347,49 @@ describe("compensateCommitment", () => {
     const second = await compensateCommitment(testDb, input);
     expect(first.supplierReceipt.status).toBe("succeeded");
     expect(second.supplierReceipt.id).toBe(first.supplierReceipt.id); // same receipt row, not a duplicate
+    expect(second.orderReceipt.id).toBe(first.orderReceipt.id);
+    expect(second.crmReceipt.id).toBe(first.crmReceipt.id);
+    expect(await testDb.crmStageEvent.count({ where: { caseId: dealCase.id } })).toBe(1);
 
     const plan = await testDb.deliveryPlanOption.findUniqueOrThrow({ where: { planId: "RT-BLR-HYD" } });
     expect(plan.capacityRemaining).toBe(350 - 151 + 151); // held then released back once, not twice
+  });
+
+  it("keys each affected logistics reservation's compensation off the reservation itself, not the shared plan resourceRef", async () => {
+    // Regression test: two different reservations against the SAME delivery plan
+    // previously derived the IDENTICAL idempotency key (both keyed off the plan's
+    // shared "PLAN:<planId>" resourceRef), so the second reservation's compensation
+    // silently short-circuited as an "already succeeded" dedup hit against the
+    // first's receipt — permanently losing the second reservation's capacity credit
+    // with no error.
+    const { dealCase } = await seedReadyCase();
+    await testDb.supplierOption.create({ data: { supplierId: "VEND-2003", sku: "MAT-10001", availableQuantity: 151, unitCostMinor: 289_137, leadDays: 18, optionTtlSeconds: 900, status: "available" } });
+    await testDb.deliveryPlanOption.create({ data: { planId: "RT-BLR-HYD", originWarehouseId: "WH-BLR", destinationId: "ZONE-SOUTH", deliveredQuantity: 350, deliveryDate: new Date("2026-09-12"), costMinor: 400_000, splitShipment: true, capacityRemaining: 350 } });
+
+    const supplierReservation = await holdSupplierOption(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", supplierId: "VEND-2003", sku: "MAT-10001", quantity: 151, maxUnitCostMinor: 300_000, maxLeadDays: 21, ttlSeconds: 900 });
+    // Two separate holds against the SAME plan, at different case versions, mirroring
+    // the reviewer's repro (100 + 60 units against one plan with 350 total capacity).
+    const logisticsReservationA = await holdDeliverySlot(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", planId: "RT-BLR-HYD", quantity: 100, ttlSeconds: 900 });
+    const logisticsReservationB = await holdDeliverySlot(testDb, { caseId: dealCase.id, caseVersion: 2, termsHash: "hash-1", planId: "RT-BLR-HYD", quantity: 60, ttlSeconds: 900 });
+    await testDb.sandboxOrder.create({ data: { caseId: dealCase.id, certificateId: "CERT-1", sku: "MAT-10001", quantity: 350, totalValueMinor: 147_000_000, status: "accepted" } });
+
+    const input = {
+      caseId: dealCase.id,
+      caseVersion: 2,
+      brokenCertificateId: "CERT-1",
+      disruptedSupplierReservationId: supplierReservation.id,
+      affectedLogisticsReservationIds: [logisticsReservationA.id, logisticsReservationB.id],
+    };
+    const result = await compensateCommitment(testDb, input);
+
+    expect(result.logisticsReceipts).toHaveLength(2);
+    const [receiptA, receiptB] = result.logisticsReceipts;
+    expect(receiptA?.id).not.toBe(receiptB?.id);
+
+    // Plan started at 350, held down to 350 - 100 - 60 = 190, both reservations
+    // compensated back should restore it to the full 350.
+    const plan = await testDb.deliveryPlanOption.findUniqueOrThrow({ where: { planId: "RT-BLR-HYD" } });
+    expect(plan.capacityRemaining).toBe(350);
   });
 });
 
