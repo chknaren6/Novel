@@ -157,6 +157,7 @@ model CommitCertificate {
   status                  String
   supersedesCertificateId String?
   certificateHash         String
+  idempotencyKey          String    @unique
   createdAt               DateTime  @default(now())
   consumedAt              DateTime?
   brokenAt                DateTime?

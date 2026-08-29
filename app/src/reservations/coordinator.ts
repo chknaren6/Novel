@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { ToolError, type ReservationDomain, type ReservationStatus } from "@/lib/types";
 import { certificateHash as computeCertificateHash } from "@/lib/hash";
 import { deriveIdempotencyKey } from "@/policy/idempotency";
@@ -27,65 +27,100 @@ export interface PrepareCertificateInput {
 // them before creating the row at all, so an invalid attempt never becomes a `draft`
 // certificate that has to be cleaned up.
 export async function prepareCommitCertificate(db: PrismaClient, input: PrepareCertificateInput) {
-  return db.$transaction(async (tx) => {
-    const reservations = await tx.reservation.findMany({ where: { id: { in: input.reservationIds } } });
-    if (reservations.length !== input.reservationIds.length) {
-      throw new ToolError("INVALID_INPUT", "One or more reservation ids do not exist", false);
-    }
-    const now = new Date();
-    for (const reservation of reservations) {
-      if (reservation.caseId !== input.caseId || reservation.termsHash !== input.termsHash) {
-        throw new ToolError("TERMS_HASH_MISMATCH", `Reservation ${reservation.id} does not match case ${input.caseId} / terms hash ${input.termsHash}`, false, [reservation.id]);
-      }
-      // A `held` reservation must belong to exactly this case version and be unexpired.
-      // A `committed` reservation may belong to an *earlier* case version of the same
-      // case: it already executed durably during a prior commit and does not need to
-      // be re-verified or re-held during repair — 04-DATA-AND-STATE-SPEC.md "Inventory
-      // and Finance decisions are reused only after freshness validation" (Case 3).
-      // Re-holding it would double-count the resource, since the pool decrement from
-      // the original hold is never restored for a committed reservation.
-      if (reservation.status === "committed") continue;
-      if (reservation.status !== "held") {
-        throw new ToolError("RESERVATION_EXPIRED", `Reservation ${reservation.id} is not held (status=${reservation.status})`, true, [reservation.id]);
-      }
-      if (reservation.caseVersion !== input.caseVersion) {
-        throw new ToolError("STALE_CASE_VERSION", `Held reservation ${reservation.id} belongs to a different case version than ${input.caseVersion}`, true, [reservation.id]);
-      }
-      if (reservation.expiresAt <= now) {
-        throw new ToolError("RESERVATION_EXPIRED", `Reservation ${reservation.id} expired at ${reservation.expiresAt.toISOString()}`, true, [reservation.id]);
-      }
-    }
-    const coveredDomains = new Set(reservations.map((r) => r.domain));
-    for (const domain of input.requiredDomains) {
-      if (!coveredDomains.has(domain)) {
-        throw new ToolError("POLICY_VIOLATION", `No held reservation covers required domain "${domain}"`, false);
-      }
-    }
-    // Only `held` reservations are still time-bound; a `committed` one (reused from an
-    // earlier case version during repair) no longer has a meaningful expiry.
-    const heldExpiries = reservations.filter((r) => r.status === "held").map((r) => r.expiresAt);
-    const validUntil = heldExpiries.length > 0 ? heldExpiries.reduce((earliest, expiry) => (expiry < earliest ? expiry : earliest)) : new Date(Date.now() + 15 * 60 * 1000);
-    const policyVersions = Object.fromEntries(reservations.map((r) => [r.domain, r.policyVersion]));
-    const hash = computeCertificateHash({ caseId: input.caseId, termsHash: input.termsHash, reservationIds: input.reservationIds });
-
-    assertValidCertificateTransition("draft", "valid");
-    return tx.commitCertificate.create({
-      data: {
-        caseId: input.caseId,
-        caseVersion: input.caseVersion,
-        termsHash: input.termsHash,
-        // reservationIds is a JSON-in-TEXT column (SQLite has no native Json type;
-        // see prisma/schema.prisma and lib/json-column.ts) — must go through
-        // toJsonColumn, never a bare cast.
-        reservationIds: toJsonColumn(input.reservationIds),
-        // policyVersions is likewise JSON-in-TEXT.
-        policyVersions: toJsonColumn(policyVersions),
-        validUntil,
-        status: "valid",
-        certificateHash: hash,
-      },
-    });
+  // Idempotency key deliberately includes caseVersion (unlike certificateHash, which
+  // omits it): a legitimate repair re-issuance can share the same termsHash and
+  // reservationIds as an earlier, already-consumed certificate but at a new
+  // caseVersion, and must NOT be mistaken for a duplicate of that earlier attempt.
+  // Reservation ids are sorted so a caller passing the same set in a different order
+  // still hits the same key.
+  const idempotencyKey = deriveIdempotencyKey({
+    caseId: input.caseId,
+    caseVersion: input.caseVersion,
+    actionType: "prepare_commit_certificate",
+    resourceRef: [...input.reservationIds].sort().join(","),
   });
+  const existing = await db.commitCertificate.findUnique({ where: { idempotencyKey } });
+  if (existing) return existing;
+
+  try {
+    return await db.$transaction(async (tx) => {
+      // Re-check inside the transaction: see inventoryAdapter.ts for why (a concurrent
+      // caller with the identical idempotency key may have committed between the
+      // pre-check above and acquiring the lock here).
+      const alreadyPrepared = await tx.commitCertificate.findUnique({ where: { idempotencyKey } });
+      if (alreadyPrepared) return alreadyPrepared;
+
+      const reservations = await tx.reservation.findMany({ where: { id: { in: input.reservationIds } } });
+      if (reservations.length !== input.reservationIds.length) {
+        throw new ToolError("INVALID_INPUT", "One or more reservation ids do not exist", false);
+      }
+      const now = new Date();
+      for (const reservation of reservations) {
+        if (reservation.caseId !== input.caseId || reservation.termsHash !== input.termsHash) {
+          throw new ToolError("TERMS_HASH_MISMATCH", `Reservation ${reservation.id} does not match case ${input.caseId} / terms hash ${input.termsHash}`, false, [reservation.id]);
+        }
+        // A `held` reservation must belong to exactly this case version and be unexpired.
+        // A `committed` reservation may belong to an *earlier* case version of the same
+        // case: it already executed durably during a prior commit and does not need to
+        // be re-verified or re-held during repair — 04-DATA-AND-STATE-SPEC.md "Inventory
+        // and Finance decisions are reused only after freshness validation" (Case 3).
+        // Re-holding it would double-count the resource, since the pool decrement from
+        // the original hold is never restored for a committed reservation.
+        if (reservation.status === "committed") continue;
+        if (reservation.status !== "held") {
+          throw new ToolError("RESERVATION_EXPIRED", `Reservation ${reservation.id} is not held (status=${reservation.status})`, true, [reservation.id]);
+        }
+        if (reservation.caseVersion !== input.caseVersion) {
+          throw new ToolError("STALE_CASE_VERSION", `Held reservation ${reservation.id} belongs to a different case version than ${input.caseVersion}`, true, [reservation.id]);
+        }
+        if (reservation.expiresAt <= now) {
+          throw new ToolError("RESERVATION_EXPIRED", `Reservation ${reservation.id} expired at ${reservation.expiresAt.toISOString()}`, true, [reservation.id]);
+        }
+      }
+      const coveredDomains = new Set(reservations.map((r) => r.domain));
+      for (const domain of input.requiredDomains) {
+        if (!coveredDomains.has(domain)) {
+          throw new ToolError("POLICY_VIOLATION", `No held reservation covers required domain "${domain}"`, false);
+        }
+      }
+      // Only `held` reservations are still time-bound; a `committed` one (reused from an
+      // earlier case version during repair) no longer has a meaningful expiry.
+      const heldExpiries = reservations.filter((r) => r.status === "held").map((r) => r.expiresAt);
+      const validUntil = heldExpiries.length > 0 ? heldExpiries.reduce((earliest, expiry) => (expiry < earliest ? expiry : earliest)) : new Date(Date.now() + 15 * 60 * 1000);
+      const policyVersions = Object.fromEntries(reservations.map((r) => [r.domain, r.policyVersion]));
+      const hash = computeCertificateHash({ caseId: input.caseId, termsHash: input.termsHash, reservationIds: input.reservationIds });
+
+      assertValidCertificateTransition("draft", "valid");
+      return tx.commitCertificate.create({
+        data: {
+          caseId: input.caseId,
+          caseVersion: input.caseVersion,
+          termsHash: input.termsHash,
+          // reservationIds is a JSON-in-TEXT column (SQLite has no native Json type;
+          // see prisma/schema.prisma and lib/json-column.ts) — must go through
+          // toJsonColumn, never a bare cast.
+          reservationIds: toJsonColumn(input.reservationIds),
+          // policyVersions is likewise JSON-in-TEXT.
+          policyVersions: toJsonColumn(policyVersions),
+          validUntil,
+          status: "valid",
+          certificateHash: hash,
+          idempotencyKey,
+        },
+      });
+    });
+  } catch (error) {
+    // Belt-and-suspenders for true concurrent execution under weaker isolation (e.g. a
+    // future Postgres swap, where two transactions could both pass the re-check above
+    // before either commits): if the DB's own unique constraint on idempotencyKey
+    // rejects a duplicate create, the whole transaction rolls back, and we return the
+    // winner's row instead of surfacing a raw constraint error to the caller.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const winner = await db.commitCertificate.findUnique({ where: { idempotencyKey } });
+      if (winner) return winner;
+    }
+    throw error;
+  }
 }
 
 export interface CommitOrderInput {
@@ -101,8 +136,14 @@ export interface CommitOrderInput {
 
 // Requires a valid certificate ID and certificate hash; commits sandbox order,
 // allocation, CRM, Stripe checkout-release, and outbox actions through idempotent
-// receipts (05-TOOL-CONTRACTS.md "commit_order"). Reservations move to `committed` and
-// the certificate to `consumed` only after the required receipts succeed.
+// receipts (05-TOOL-CONTRACTS.md "commit_order"). All three receipted actions
+// (sandbox order + CRM, Stripe checkout, outbox) run first — each is independently
+// idempotent via runReceiptedAction, so their relative order doesn't change their
+// meaning and a crash between any two of them is safely retryable. Reservations move
+// to `committed` only after all three receipts succeed, and the certificate becomes
+// `consumed` last of all, via an atomic compare-and-swap, so a crash at any point
+// before that leaves the top-of-function "must be valid" guard able to let a retry
+// pick up where it left off.
 export async function commitOrder(db: PrismaClient, input: CommitOrderInput) {
   const certificate = await db.commitCertificate.findUniqueOrThrow({ where: { id: input.certificateId } });
   if (certificate.status !== "valid") {
@@ -147,21 +188,6 @@ export async function commitOrder(db: PrismaClient, input: CommitOrderInput) {
     },
   });
 
-  // reservationIds is a JSON-in-TEXT column — parse it through fromJsonColumn rather
-  // than a bare cast, per this project's SQLite Json-as-TEXT convention.
-  const reservationIds = fromJsonColumn<string[]>(certificate.reservationIds);
-  for (const reservationId of reservationIds) {
-    await db.$transaction(async (tx) => {
-      const reservation = await tx.reservation.findUniqueOrThrow({ where: { id: reservationId } });
-      if (reservation.status === "committed") return;
-      assertValidReservationTransition(reservation.status as ReservationStatus, "committed");
-      await tx.reservation.update({ where: { id: reservationId }, data: { status: "committed" } });
-    });
-  }
-
-  assertValidCertificateTransition("valid", "consumed");
-  await db.commitCertificate.update({ where: { id: input.certificateId }, data: { status: "consumed", consumedAt: new Date() } });
-
   const outboxReceipt = await runReceiptedAction(db, {
     caseId: input.caseId,
     caseVersion: input.caseVersion,
@@ -183,29 +209,74 @@ export async function commitOrder(db: PrismaClient, input: CommitOrderInput) {
     },
   });
 
+  // reservationIds is a JSON-in-TEXT column — parse it through fromJsonColumn rather
+  // than a bare cast, per this project's SQLite Json-as-TEXT convention.
+  const reservationIds = fromJsonColumn<string[]>(certificate.reservationIds);
+  for (const reservationId of reservationIds) {
+    await db.$transaction(async (tx) => {
+      const reservation = await tx.reservation.findUniqueOrThrow({ where: { id: reservationId } });
+      if (reservation.status === "committed") return;
+      assertValidReservationTransition(reservation.status as ReservationStatus, "committed");
+      await tx.reservation.update({ where: { id: reservationId }, data: { status: "committed" } });
+    });
+  }
+
+  assertValidCertificateTransition("valid", "consumed");
+  const consumedUpdate = await db.commitCertificate.updateMany({
+    where: { id: input.certificateId, status: "valid" },
+    data: { status: "consumed", consumedAt: new Date() },
+  });
+  if (consumedUpdate.count === 0) {
+    // Lost the race to a concurrent or retried commitOrder call for the same
+    // certificate. Every step above this point is itself idempotent (receipts keyed
+    // by certificateId; the reservation-commit loop is a no-op once already
+    // committed), so if the certificate really did land on "consumed", the winner
+    // already produced the exact same outcome this call would have — treat that as
+    // success rather than a conflict. Anything else is a genuine, unexpected state.
+    const current = await db.commitCertificate.findUniqueOrThrow({ where: { id: input.certificateId } });
+    if (current.status !== "consumed") {
+      throw new ToolError("POLICY_VIOLATION", `Certificate ${input.certificateId} could not be marked consumed (status=${current.status})`, false);
+    }
+  }
+
   return { orderReceipt, checkoutReceipt, outboxReceipt };
 }
 
+export type AbortCommitmentResult =
+  | { reservationId: string; status: "released"; reservation: unknown }
+  | { reservationId: string; status: "failed"; error: unknown };
+
 // Releases every still-held reservation for a preparation attempt. Repeated calls
 // return existing release results — each release function is itself a no-op once a
-// reservation is no longer `held` (05-TOOL-CONTRACTS.md "abort_commitment").
-export async function abortCommitment(db: PrismaClient, input: { caseId: string; caseVersion: number }) {
+// reservation is no longer `held` (05-TOOL-CONTRACTS.md "abort_commitment"). A release
+// that throws is caught per-item rather than aborting the loop: the caller needs to
+// know which reservations were actually released even when one release fails, not lose
+// that information to an unhandled rejection that discards every result gathered so far.
+export async function abortCommitment(db: PrismaClient, input: { caseId: string; caseVersion: number }): Promise<AbortCommitmentResult[]> {
   const reservations = await db.reservation.findMany({ where: { caseId: input.caseId, caseVersion: input.caseVersion, status: "held" } });
-  const results = [];
+  const results: AbortCommitmentResult[] = [];
   for (const reservation of reservations) {
-    switch (reservation.domain as ReservationDomain) {
-      case "inventory":
-        results.push(await releaseInventoryHold(db, reservation.id));
-        break;
-      case "supplier":
-        results.push(await cancelSupplierOptionHold(db, reservation.id));
-        break;
-      case "logistics":
-        results.push(await releaseDeliverySlot(db, reservation.id));
-        break;
-      case "credit":
-        results.push(await releaseCreditEnvelope(db, reservation.id));
-        break;
+    try {
+      let released;
+      switch (reservation.domain as ReservationDomain) {
+        case "inventory":
+          released = await releaseInventoryHold(db, reservation.id);
+          break;
+        case "supplier":
+          released = await cancelSupplierOptionHold(db, reservation.id);
+          break;
+        case "logistics":
+          released = await releaseDeliverySlot(db, reservation.id);
+          break;
+        case "credit":
+          released = await releaseCreditEnvelope(db, reservation.id);
+          break;
+        default:
+          throw new ToolError("INVALID_INPUT", `Unknown reservation domain "${reservation.domain}"`, false);
+      }
+      results.push({ reservationId: reservation.id, status: "released", reservation: released });
+    } catch (error) {
+      results.push({ reservationId: reservation.id, status: "failed", error });
     }
   }
   return results;
