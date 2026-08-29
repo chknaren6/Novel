@@ -4,6 +4,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { testDb, resetTestDb } from "@/lib/testDb";
 import { runReceiptedAction } from "./actionReceipt";
 import { ToolError } from "@/lib/types";
+import { toJsonColumn } from "@/lib/json-column";
 
 async function seedCase() {
   const company = await testDb.company.create({ data: { name: "Acme" } });
@@ -54,11 +55,54 @@ describe("runReceiptedAction", () => {
     expect(calls).toBe(1);
   });
 
+  it("rejects a retry against a receipt that is still pending (not yet succeeded or failed)", async () => {
+    // Deterministic version of the sequential-retry-while-pending scenario: caller A
+    // has already committed the "pending" receipt row and is mid-execute() right now.
+    // We simulate that directly (insert the row ourselves, exactly as create() would,
+    // without ever calling runReceiptedAction for it) so this doesn't depend on any
+    // incidental race timing the way the concurrent test below does. Caller B's
+    // findUnique pre-check must see that pending row and refuse to call execute().
+    const dealCase = await seedCase();
+    const idempotencyKey = "key-pending-retry";
+    await testDb.actionReceipt.create({
+      data: {
+        caseId: dealCase.id,
+        caseVersion: 1,
+        actionType: "sandbox_order.create",
+        resourceRef: "ORDER:pending-1",
+        idempotencyKey,
+        requestHash: "req-pending-1",
+        status: "pending",
+        provider: "sandbox_erp",
+        responsePayload: toJsonColumn({}),
+      },
+    });
+    const execute = vi.fn(async () => ({ providerRef: "SO-X", data: { orderId: "SO-X" } }));
+
+    const promise = runReceiptedAction(testDb, {
+      caseId: dealCase.id,
+      caseVersion: 1,
+      actionType: "sandbox_order.create",
+      resourceRef: "ORDER:pending-1",
+      provider: "sandbox_erp",
+      idempotencyKey,
+      requestHash: "req-pending-1",
+      execute,
+    });
+
+    await expect(promise).rejects.toBeInstanceOf(ToolError);
+    await expect(promise).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("does not double-invoke execute when two callers race with the same idempotency key", async () => {
-    // Real (non-mocked) concurrency: caller A creates the "pending" receipt and is
-    // mid-execute() when caller B retries with the identical idempotencyKey. Before
-    // the fix, B's findUnique would see A's row, treat "pending" as safe to fall
-    // through, and call execute() a second time concurrently with A.
+    // Real (non-mocked) concurrency: both callers' findUnique pre-checks race and land
+    // before either's create() commits, so neither sees the other's row up front; the
+    // second create() then hits the unique constraint (P2002), refetches the winner,
+    // and finds it still "pending" (the winner is mid-execute()). This proves the
+    // P2002-catch-and-refetch branch — not the initial pending pre-check (that's
+    // covered by the deterministic test above) — is what stops the second caller from
+    // also invoking execute().
     const dealCase = await seedCase();
     let calls = 0;
     const input = {
