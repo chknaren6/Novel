@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import type { ReceiptProvider } from "@/lib/types";
+import { ToolError } from "@/lib/types";
 import { toJsonColumn } from "@/lib/json-column";
 
 export interface RunReceiptedActionInput<T> {
@@ -9,8 +10,27 @@ export interface RunReceiptedActionInput<T> {
   resourceRef: string;
   provider: ReceiptProvider;
   idempotencyKey: string;
+  // Captured and stored on the receipt row, but NOT currently validated against a
+  // colliding existing receipt on retry: if a caller ever reuses the same
+  // idempotencyKey for a materially different request, this function has no way to
+  // detect that mismatch today. Known, documented gap — out of scope for now.
   requestHash: string;
   execute: () => Promise<{ providerRef: string | null; data: T }>;
+}
+
+// Thrown when idempotencyKey already resolves to a "pending" receipt: another
+// caller is either still mid-execute() for this exact key right now, or a prior
+// attempt crashed after creating the receipt but before execute() resolved. Either
+// way, calling execute() ourselves here would risk invoking the external effect a
+// second time, concurrently with (or in place of) whatever produced the pending
+// row. Non-retryable-by-this-function: a higher-level retry policy — not a guess
+// made here — decides whether/when to retry.
+function pendingReceiptConflict(idempotencyKey: string): ToolError {
+  return new ToolError(
+    "IDEMPOTENCY_CONFLICT",
+    `Receipt for idempotencyKey "${idempotencyKey}" is already pending`,
+    false,
+  );
 }
 
 // Create one action_receipt row before attempting an effect; mark it succeeded or
@@ -21,7 +41,12 @@ export interface RunReceiptedActionInput<T> {
 // as if nothing happened.
 export async function runReceiptedAction<T>(db: PrismaClient, input: RunReceiptedActionInput<T>) {
   const existing = await db.actionReceipt.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
-  if (existing && existing.status === "succeeded") return existing;
+  if (existing) {
+    if (existing.status === "succeeded") return existing;
+    // "failed" is safe to fall through and retry execute() below. "pending" is not:
+    // see pendingReceiptConflict().
+    if (existing.status === "pending") throw pendingReceiptConflict(input.idempotencyKey);
+  }
 
   let receipt = existing;
   if (!receipt) {
@@ -48,11 +73,13 @@ export async function runReceiptedAction<T>(db: PrismaClient, input: RunReceipte
       // while the winner is still mid-execute() (status "pending"), blindly calling
       // execute() ourselves too would double-invoke the external effect — worse than a
       // clean error. So: a "succeeded" winner is returned (crash-and-retry after the
-      // original actually completed); anything else is rethrown for the caller to
-      // retry later, never silently re-attempted in parallel with an in-flight call.
+      // original actually completed); a "pending" winner produces the same clear
+      // conflict error as the pre-check above; anything else (e.g. a non-P2002 error)
+      // is rethrown for the caller to handle.
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         const winner = await db.actionReceipt.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
         if (winner?.status === "succeeded") return winner;
+        if (winner?.status === "pending") throw pendingReceiptConflict(input.idempotencyKey);
       }
       throw error;
     }
