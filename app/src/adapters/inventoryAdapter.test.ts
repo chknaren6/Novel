@@ -53,4 +53,24 @@ describe("holdInventory", () => {
     const position = await testDb.inventoryPosition.findFirstOrThrow({ where: { sku: "MAT-10001" } });
     expect(position.availableQuantity).toBe(199);
   });
+
+  it("does not double-restore availability when released twice", async () => {
+    const dealCase = await seedCase();
+    const reservation = await holdInventory(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", sku: "MAT-10001", warehouseId: "WH-BLR", quantity: 80, ttlSeconds: 600 });
+    await releaseInventoryHold(testDb, reservation.id);
+    await releaseInventoryHold(testDb, reservation.id);
+    const position = await testDb.inventoryPosition.findFirstOrThrow({ where: { sku: "MAT-10001" } });
+    expect(position.availableQuantity).toBe(199);
+  });
+
+  it("does not double-decrement when two callers race with the same idempotency key", async () => {
+    const dealCase = await seedCase();
+    const args = { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", sku: "MAT-10001", warehouseId: "WH-BLR", quantity: 80, ttlSeconds: 600 };
+
+    const [first, second] = await Promise.all([holdInventory(testDb, args), holdInventory(testDb, args)]);
+    expect(second.id).toBe(first.id);
+
+    const position = await testDb.inventoryPosition.findFirstOrThrow({ where: { sku: "MAT-10001" } });
+    expect(position.availableQuantity).toBe(199 - 80); // decremented once, not twice, despite the race
+  });
 });
