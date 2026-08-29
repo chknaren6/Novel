@@ -1929,3 +1929,535 @@ If reality changes, CommitOS does not hide the inconsistency. It breaks the cert
 
 > **ERP records what the organization did. CommitOS proves what the organization can safely promise next—and governs that promise until it is fulfilled, repaired, or truthfully withdrawn.**
 
+---
+
+## 30. Differentiation from Snowflake's Agentic Enterprise Control Plane
+
+### 30.1 Why this comparison matters
+
+Snowflake publicly describes an **agentic enterprise control plane** that connects governed enterprise data, models, policy, agents, tools, and operational applications. Its stated control-plane responsibilities include:
+
+- coordinating agents across enterprise context;
+- controlling access to data and tools;
+- deciding whether an action should occur;
+- applying policy and risk constraints;
+- determining when human judgment is required;
+- coordinating execution across systems;
+- governing and observing an enterprise agent estate.
+
+This means CommitOS cannot credibly claim that its novelty is simply:
+
+- being an enterprise control plane;
+- connecting AI agents to governed data;
+- coordinating multi-step agent actions;
+- providing role-specific agents;
+- enforcing tool permissions;
+- placing a human in an agent workflow;
+- using shared enterprise context;
+- monitoring agent activity;
+- allowing agents to act across applications.
+
+Those are horizontal agent-platform capabilities, and Snowflake already occupies that conceptual category.
+
+### 30.2 Required positioning correction
+
+CommitOS should not position **control plane** as its primary novel category.
+
+The preferred category is:
+
+> **Business Commitment Transaction Protocol**
+
+Alternative descriptions include:
+
+- resource-backed promise protocol;
+- commitment transaction layer;
+- promise assurance and execution protocol;
+- system of commitment.
+
+The recommended positioning is:
+
+> CommitOS compiles a proposed business promise into a distributed transaction. Independent domain agents place expiring, terms-bound reservations, and a deterministic coordinator issues the certificate required to release that promise.
+
+The concise distinction is:
+
+> **Snowflake governs agents. CommitOS governs promises.**
+
+### 30.3 Product-layer distinction
+
+| Dimension | Snowflake agentic control plane | CommitOS business commitment protocol |
+|---|---|---|
+| Primary controlled object | Agents, models, tools, data access, and agent actions | A specific business promise |
+| Primary question | May this agent use this context or perform this action? | Is this exact promise fully backed and still valid? |
+| Core artifact | Governed agent, tool, context, and execution environment | Commit Graph, Reservation Receipts, and Commit Certificate |
+| Core state | Agent interaction and multi-step work | Prepare, reserve, negotiate, commit, abort, break, repair, and compensate |
+| Operational evidence | Governed context and tool results | Terms-bound, expiring receipts from independent authorities |
+| Resource semantics | Generic tools and actions | Explicit scarce-resource, limit, capacity, approval, and assurance semantics |
+| Validity | Governed by access and runtime policy | Governed by complete dependency coverage and the earliest receipt expiry |
+| Failure meaning | Agent, tool, policy, or workflow failure | An externally relevant promise becomes invalid or partially executed |
+| Recovery | Platform or application-defined workflow | Mandatory release, compensation, repair, successor certificate, or truthful escalation |
+| Privacy boundary | Snowflake access control, masking, governed context, and caller permissions | Source-local domain evaluation with minimal signed commitment evidence |
+| Primary buyer | CIO, CDO, data platform, security, and enterprise AI teams | COO, commercial, finance, supply chain, plant/property operations, and revenue assurance |
+| Product relationship | Horizontal agent and data foundation | Operational transaction protocol that may run on Snowflake or another foundation |
+
+### 30.4 Snowflake can be infrastructure beneath CommitOS
+
+Snowflake and CommitOS do not have to be mutually exclusive products.
+
+An enterprise could use Snowflake for:
+
+- governed enterprise data;
+- agent identity and access;
+- semantic models and retrieval;
+- agent creation and tool selection;
+- role-based access control;
+- model execution;
+- MCP or application tools;
+- centralized agent monitoring.
+
+CommitOS would still supply application-level semantics that are specific to business promises:
+
+- `PromiseRequest` normalization;
+- Commit Graph compilation;
+- dependency ownership;
+- Reservation Receipt protocol;
+- assurance levels;
+- exact `terms_hash` binding;
+- prepare/commit/abort state transitions;
+- certificate creation and enforcement;
+- certificate expiry and invalidation;
+- compensation contracts;
+- repair graphs;
+- predecessor and successor certificate lineage;
+- fulfilled-versus-broken commitment history.
+
+CommitOS can therefore be implemented on top of Snowflake, on another enterprise AI platform, or independently. Its differentiation must survive a change of model provider, data platform, agent framework, and ERP vendor.
+
+### 30.5 Different units of governance
+
+Snowflake's horizontal unit of governance is principally the agent and its access to context, tools, policies, and actions.
+
+CommitOS's unit of governance is the promise:
+
+```text
+requested outcome
+    + exact commercial terms
+    + required operational dependencies
+    + domain authorities
+    + expiring evidence
+    + resource reservations
+    + commit actions
+    + compensation obligations
+    = governed business commitment
+```
+
+An authorized agent action is not automatically a valid business commitment. A tool may be permitted to create an order while the promised delivery date remains operationally unsupported. CommitOS introduces a second condition:
+
+```text
+Agent is authorized to call the tool
+                      AND
+The promise has a valid Commit Certificate
+                      =
+Downstream mutation may proceed
+```
+
+### 30.6 Five differentiating protocol primitives
+
+#### A. Commit Graph
+
+An external request is compiled into an explicit graph of conditions that must be true before the promise can exist.
+
+The graph defines:
+
+- required and optional dependencies;
+- owning authority for each dependency;
+- execution ordering;
+- parallel-safe checks;
+- assurance requirements;
+- expiry rules;
+- counterterm operators;
+- compensation obligations.
+
+#### B. Reservation Receipt
+
+Every required authority returns a typed receipt rather than conversational agreement.
+
+The receipt proves:
+
+- what dependency was covered;
+- which terms were evaluated;
+- which resource, capacity, or limit was reserved;
+- which authority made the decision;
+- which policy version was used;
+- how strong the assurance is;
+- when the evidence expires;
+- how the receipt can be verified.
+
+#### C. Commit Certificate
+
+All mandatory receipts must cover the same terms hash. The resulting certificate is the authorization key required by downstream commitment actions.
+
+The certificate is not a report generated after an agent run. It is an enforced business transaction object.
+
+#### D. Broken and Successor Certificates
+
+A certificate becomes broken when a material dependency fails, expires, or is revoked. Repair creates a formally linked successor certificate rather than silently editing the historical promise.
+
+```text
+CERT-100: original commitment
+    |
+    +-- broken_by: supplier capacity cancellation
+    |
+    +-- successor: CERT-101
+                     revised quantity/date
+                     new terms hash
+                     new receipts
+```
+
+#### E. Assurance-aware commitment
+
+CommitOS distinguishes among:
+
+- hard source-system hold;
+- authoritative source approval;
+- signed human attestation;
+- snapshot observation.
+
+The certificate reports the weakest critical assurance level and applies organization policy accordingly. An uploaded spreadsheet must not be presented as equivalent to a live, source-backed reservation.
+
+### 30.7 Defensible differentiation statement
+
+The recommended formal differentiation statement is:
+
+> CommitOS is a terms-bound business commitment protocol in which an external promise becomes executable only after independent operational authorities issue expiring reservation receipts. A deterministic coordinator binds those receipts into a Commit Certificate, invalidates the certificate when evidence changes, and coordinates repair or compensation after partial failure.
+
+### 30.8 Claims CommitOS must avoid
+
+CommitOS should not say:
+
+- it invented the enterprise agent control plane;
+- it invented governed enterprise agents;
+- it invented available-to-promise;
+- it invented distributed transactions or sagas;
+- it is novel merely because multiple agents use different tools;
+- it guarantees atomic rollback across systems that do not support it;
+- it provides cryptographic or privacy guarantees that are not implemented;
+- no existing enterprise platform could technically implement similar workflows.
+
+The honest claim is that CommitOS packages known capabilities into a specific, enforceable transaction protocol and product object for cross-domain business promises.
+
+### 30.9 Competitive implication
+
+If CommitOS only demonstrates agents querying governed data, applying policy, obtaining human approval, and calling tools, it is not sufficiently differentiated from Snowflake's public control-plane direction.
+
+If CommitOS demonstrates terms-bound reservations, certificate enforcement, expiry, live invalidation, compensation, and successor commitments, it occupies a narrower product layer that Snowflake can support as infrastructure but does not define as the central product object in the reviewed public material.
+
+### 30.10 Reference links
+
+- [Snowflake — Powering the Era of the Agentic Enterprise](https://www.snowflake.com/en/blog/agentic-enterprise-control-plane/)
+- [Snowflake — The Agentic Control Plane](https://www.snowflake.com/en/artificial-intelligence/ai-governance/control-plane/)
+- [Snowflake documentation — Build agents](https://docs.snowflake.com/en/user-guide/snowflake-cortex/snowflake-cowork/build-agents)
+- [Snowflake documentation — User access and settings for agents](https://docs.snowflake.com/en/user-guide/snowflake-cortex/snowflake-cowork/deploy-agents)
+
+---
+
+## 31. What the Demonstration Must Prove
+
+### 31.1 Demo objective
+
+The demonstration must prove that CommitOS is an enforceable commitment transaction protocol, not a collection of agents operating on enterprise data.
+
+The audience should be able to answer all of the following after the demonstration:
+
+1. What exact promise was requested?
+2. Which operational dependencies were required?
+3. Why was each agent activated?
+4. What private authority did each agent possess?
+5. Which resources or limits were actually held?
+6. How long were the holds valid?
+7. Why could the original terms not be committed?
+8. Which counterterm changed feasibility?
+9. What made the final certificate valid?
+10. Why could the downstream action not bypass the certificate?
+11. What happened when a dependency changed?
+12. Were partial actions repaired, released, compensated, or escalated exactly once?
+
+### 31.2 Required proof sequence
+
+#### Proof 1: Request-to-graph compilation
+
+Show an unstructured business request becoming typed terms and an explicit Commit Graph.
+
+The graph must display:
+
+- requested outcome;
+- quantity or scope;
+- price and payment terms;
+- deadline or service condition;
+- required dependencies;
+- owning domains;
+- assurance requirements.
+
+This proves that the system is reasoning about a promise rather than merely responding to a question.
+
+#### Proof 2: Dynamic agent activation
+
+Begin with a smaller agent set. Allow one agent to discover a new dependency that causes the coordinator to activate another registered agent.
+
+Example pattern:
+
+```text
+Resource agent discovers an internal shortfall
+                    ->
+External-supply agent is activated
+```
+
+The UI must show why the new agent appeared and which authority it owns.
+
+This proves that orchestration follows the dependency graph rather than a fixed theatrical council.
+
+#### Proof 3: Independent context and authority
+
+Show that agents do not share unrestricted context.
+
+For example:
+
+- commercial sees the permitted price range but not the complete cost ledger;
+- finance sees exposure and policy but not confidential supplier details;
+- resource operations see quantity and allocation but not customer strategy;
+- the coordinator receives a signed decision rather than raw private records.
+
+Attempting an unauthorized read or mutation should fail visibly.
+
+#### Proof 4: Real reservation state
+
+At least two agents must create actual persisted reservations containing:
+
+- reservation ID;
+- resource reference;
+- covered quantity or limit;
+- terms hash;
+- expiry;
+- policy version;
+- assurance level;
+- receipt or action hash.
+
+The reservation must affect subsequent availability. Re-running the same request must not pretend the resource remains unallocated.
+
+#### Proof 5: Original terms fail closed
+
+At least one domain must reject the original request for a specific, deterministic reason.
+
+Examples:
+
+- insufficient resource coverage;
+- credit limit exceeded;
+- margin below policy;
+- capacity outside the requested date;
+- required assurance missing;
+- evidence too stale.
+
+No certificate may be issued while the dependency remains red.
+
+#### Proof 6: Bounded counterterm changes feasibility
+
+Change one or more permitted terms, such as:
+
+- deposit percentage;
+- quantity;
+- delivery date;
+- split fulfillment;
+- substitute resource;
+- price or discount.
+
+The revised terms must receive a new `terms_hash`. Previous terms-dependent approvals must not be reused unless policy explicitly permits it.
+
+All affected agents re-evaluate the revised request.
+
+#### Proof 7: Certificate creation from matched receipts
+
+Show the deterministic coordinator verifying:
+
+- all required dependencies are satisfied;
+- all receipts cover the same terms hash;
+- all receipts remain fresh;
+- all authorities are valid;
+- all minimum assurance requirements are met;
+- the certificate expiry is derived from the earliest critical receipt expiry.
+
+The final certificate must expose its receipts and validation result.
+
+#### Proof 8: Certificate-enforced execution
+
+Attempt the downstream action once without a valid certificate.
+
+It must fail.
+
+Then execute the same action with the valid certificate.
+
+It must succeed and produce an independent execution receipt.
+
+Example actions include:
+
+- create a confirmed order;
+- confirm a booking;
+- release a production job;
+- issue a binding quote;
+- create a payment authorization;
+- reserve a delivery or service slot.
+
+This is the strongest visible distinction between CommitOS and a recommendation or agent-governance interface.
+
+#### Proof 9: Live certificate invalidation
+
+After preparation or commitment, change one material fact:
+
+- cancel a supplier option;
+- expire a capacity hold;
+- mark a machine unavailable;
+- revoke a payment authorization;
+- change a required policy;
+- remove an allocated resource.
+
+The certificate must visibly transition to `broken` or `expired`. It must no longer authorize new downstream actions.
+
+#### Proof 10: Selective repair
+
+The repair engine must identify the affected subgraph and reactivate only the necessary agents.
+
+It should preserve unaffected reservations when policy allows rather than restarting every domain.
+
+The result must be:
+
+- a successor certificate with new terms and receipts;
+- an exact `cannot_commit` or `repair_needed` outcome; or
+- a human escalation identifying the missing authority.
+
+#### Proof 11: Idempotent compensation
+
+If an action already succeeded before failure, demonstrate its declared compensation.
+
+Trigger the compensation twice. The second invocation must not duplicate the reversal, refund, release, or cancellation.
+
+The evidence timeline must show one effective compensation and the duplicate-safe retry.
+
+#### Proof 12: Persistent and auditable state
+
+Refresh or resume the case and show that CommitOS preserves:
+
+- request identity;
+- terms versions;
+- agent decisions;
+- policy versions;
+- reservation receipts;
+- certificate state;
+- actions and idempotency keys;
+- disruption and repair history.
+
+The system must not reconstruct operational truth from a chat transcript.
+
+### 31.3 Essential visual state transition
+
+The memorable visual transition should be:
+
+```text
+UNBACKED REQUEST
+       |
+       v
+COMMIT GRAPH WITH RED DEPENDENCIES
+       |
+       v
+EXPIRING DOMAIN RESERVATIONS
+       |
+       v
+TERMS-BOUND COMMIT CERTIFICATE
+       |
+       v
+ENFORCED DOWNSTREAM EXECUTION
+       |
+       v
+DEPENDENCY FAILURE
+       |
+       v
+BROKEN CERTIFICATE
+       |
+       v
+SUCCESSOR CERTIFICATE OR COMPENSATED EXIT
+```
+
+### 31.4 Minimum evidence visible on screen
+
+The demo UI must visibly expose:
+
+- request ID;
+- terms version and abbreviated terms hash;
+- agent activation reason;
+- dependency owner;
+- reservation IDs;
+- quantities or limits covered;
+- expiry countdowns;
+- assurance levels;
+- policy versions;
+- certificate status;
+- certificate predecessor/successor relationship;
+- action receipts;
+- idempotency keys;
+- compensation status.
+
+### 31.5 What must not be the primary demo
+
+The following may support the product but cannot be the main proof:
+
+- a chat transcript between agents;
+- a generated recommendation;
+- a summary of company data;
+- an attractive dashboard without mutations;
+- a fixed animation of agent cards;
+- a list of integrations;
+- a generic policy approval;
+- a forecasted profit number;
+- an agent selecting and calling a tool;
+- a certificate-shaped PDF that downstream tools ignore.
+
+### 31.6 Snowflake differentiation test
+
+Before accepting the demo, ask:
+
+> Could a generic governed enterprise agent platform produce an indistinguishable result by querying data and calling tools?
+
+If the answer is yes, the demo does not prove CommitOS.
+
+The demo passes only when it visibly proves:
+
+```text
+terms-bound dependency graph
++ independent reservation receipts
++ deterministic certificate validation
++ certificate-gated execution
++ live invalidation
++ semantic repair or compensation
+```
+
+### 31.7 Demo acceptance checklist
+
+- [ ] The original request is unstructured.
+- [ ] The normalized terms are visible.
+- [ ] The Commit Graph is generated from configuration.
+- [ ] At least one agent is activated dynamically.
+- [ ] At least two persisted reservations are created.
+- [ ] Agents have visibly different context and authority.
+- [ ] One original dependency rejects the request.
+- [ ] A bounded counterterm changes feasibility.
+- [ ] Revised receipts use the new terms hash.
+- [ ] The deterministic coordinator issues the certificate.
+- [ ] An invalid or missing certificate is rejected by an execution tool.
+- [ ] A valid certificate produces an execution receipt.
+- [ ] A material dependency failure breaks the certificate.
+- [ ] Only affected agents reactivate for repair.
+- [ ] Compensation is idempotent.
+- [ ] A successor certificate or truthful escalation is produced.
+- [ ] State survives refresh or resume.
+- [ ] The audit timeline is independent of the agent transcript.
+
+### 31.8 Final differentiated demo statement
+
+> The demo is not proving that agents can access company data and perform governed actions. Snowflake and other enterprise AI platforms already pursue that capability. The demo is proving that a business promise can be compiled, reserved, cryptographically bound to exact terms, enforced at execution, invalidated when reality changes, and repaired or compensated without relying on conversational agreement.
