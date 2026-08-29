@@ -1,0 +1,9 @@
+node_modules/
+.next/
+dev.db
+dev.db-journal
+test-*.db
+test-*.db-journal
+.env.local
+*.tsbuildinfo
+submission/
