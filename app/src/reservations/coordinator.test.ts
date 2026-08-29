@@ -1,5 +1,5 @@
 // src/reservations/coordinator.test.ts
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { testDb, resetTestDb } from "@/lib/testDb";
 import { prepareCommitCertificate, commitOrder, abortCommitment } from "./coordinator";
@@ -106,30 +106,31 @@ describe("prepareCommitCertificate", () => {
 
   it("does not block a legitimate re-issuance at a new caseVersion with the same termsHash and reservation shape", async () => {
     // certificateHash is deliberately computed without caseVersion, so a legitimate
-    // repair re-issuance can share the same termsHash and an equivalent reservation set
-    // as an earlier certificate. The idempotency key must include caseVersion so this
-    // case is NOT mistaken for a duplicate of the version-1 call.
-    const { dealCase, customer, reservationIds } = await seedReadyCase();
+    // repair re-issuance can share the same termsHash and reservation ids as an earlier
+    // certificate. The idempotency key must include caseVersion so this case is NOT
+    // mistaken for a duplicate of the version-1 call. This must reuse the SAME
+    // reservationIds across both calls (not a fresh set) to actually exercise that:
+    // different reservationIds would already produce a different idempotency key
+    // regardless of caseVersion. Reusing the same ids only works once they are
+    // "committed" — a still-"held" reservation from an earlier case version would hit
+    // the caseVersion-mismatch check instead — so this drives the reservations to
+    // "committed" via a real commitOrder call first, landing on the actual
+    // repair-reuse branch (`if (reservation.status === "committed") continue;`).
+    const { dealCase, reservationIds } = await seedReadyCase();
     const first = await prepareCommitCertificate(testDb, {
       caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", reservationIds, requiredDomains: ["inventory", "credit"],
     });
 
-    // Top up the shared pools so a second, independent hold at case version 2 can
-    // succeed with the same terms hash, simulating a repair re-issuance rather than
-    // reusing any resource from the version-1 hold above.
-    await testDb.inventoryPosition.updateMany({ where: { sku: "MAT-10001" }, data: { availableQuantity: 50 } });
-    const inventoryReservation2 = await holdInventory(testDb, {
-      caseId: dealCase.id, caseVersion: 2, termsHash: "hash-1", sku: "MAT-10001", warehouseId: "WH-BLR", quantity: 50, ttlSeconds: 600,
-    });
-    const creditReservation2 = await holdCreditEnvelope(testDb, {
-      caseId: dealCase.id, caseVersion: 2, termsHash: "hash-1", customerId: customer.id, paymentTerms: "ADVANCE_30", exposureMinor: 1_000_000, ttlSeconds: 600,
+    await commitOrder(testDb, {
+      caseId: dealCase.id, caseVersion: 1, certificateId: first.id, certificateHash: first.certificateHash,
+      sku: "MAT-10001", quantity: 350, totalValueMinor: 147_000_000, depositMinor: 44_100_000,
     });
 
     const second = await prepareCommitCertificate(testDb, {
       caseId: dealCase.id,
       caseVersion: 2,
       termsHash: "hash-1",
-      reservationIds: [inventoryReservation2.id, creditReservation2.id],
+      reservationIds,
       requiredDomains: ["inventory", "credit"],
     });
 
@@ -140,6 +141,9 @@ describe("prepareCommitCertificate", () => {
 
 describe("commitOrder", () => {
   beforeEach(resetTestDb);
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   it("commits reservations, marks the certificate consumed, and writes required receipts exactly once", async () => {
     const { dealCase, reservationIds } = await seedReadyCase();
@@ -177,6 +181,64 @@ describe("commitOrder", () => {
     await expect(
       commitOrder(testDb, { caseId: dealCase.id, caseVersion: 1, certificateId: certificate.id, certificateHash: "wrong-hash", sku: "MAT-10001", quantity: 350, totalValueMinor: 147_000_000, depositMinor: 44_100_000 }),
     ).rejects.toThrow(ToolError);
+  });
+
+  it("treats losing the atomic consumed-transition race to a concurrent winner as success when the certificate is already consumed", async () => {
+    // Forces the ONE commitCertificate.updateMany call in commitOrder (the final,
+    // atomic valid->consumed compare-and-swap) to report zero rows updated, as if a
+    // concurrent commitOrder call for the same certificate already won that race.
+    // Everything else in the flow — the top-of-function validity check, all three
+    // receipted actions, and the reservation-commit loop — runs for real against the
+    // real testDb; only this one statement is intercepted. The mock performs the real
+    // status transition itself (via a direct testDb.commitCertificate.update call)
+    // rather than doing so before invoking commitOrder, so that the top-of-function
+    // "must be valid" guard still sees "valid" and this call actually reaches the
+    // race-loss branch instead of bailing out earlier for an unrelated reason.
+    const { dealCase, reservationIds } = await seedReadyCase();
+    const certificate = await prepareCommitCertificate(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", reservationIds, requiredDomains: ["inventory", "credit"] });
+
+    vi.spyOn(testDb.commitCertificate, "updateMany").mockImplementationOnce((async () => {
+      await testDb.commitCertificate.update({ where: { id: certificate.id }, data: { status: "consumed", consumedAt: new Date() } });
+      return { count: 0 };
+    }) as unknown as typeof testDb.commitCertificate.updateMany);
+
+    const result = await commitOrder(testDb, {
+      caseId: dealCase.id, caseVersion: 1, certificateId: certificate.id, certificateHash: certificate.certificateHash,
+      sku: "MAT-10001", quantity: 350, totalValueMinor: 147_000_000, depositMinor: 44_100_000,
+    });
+
+    expect(result.orderReceipt.status).toBe("succeeded");
+    expect(result.checkoutReceipt.status).toBe("succeeded");
+    expect(result.outboxReceipt.status).toBe("succeeded");
+
+    const reloadedCert = await testDb.commitCertificate.findUniqueOrThrow({ where: { id: certificate.id } });
+    expect(reloadedCert.status).toBe("consumed");
+  });
+
+  it("throws a POLICY_VIOLATION when losing the atomic consumed-transition race resolves to neither valid nor consumed", async () => {
+    // Same race-loss shape as above, but the re-fetched status after count===0 is some
+    // genuinely unexpected state — not the benign "someone else already consumed it"
+    // outcome — which must surface as a real error rather than be silently treated as
+    // success.
+    const { dealCase, reservationIds } = await seedReadyCase();
+    const certificate = await prepareCommitCertificate(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", reservationIds, requiredDomains: ["inventory", "credit"] });
+
+    vi.spyOn(testDb.commitCertificate, "updateMany").mockImplementationOnce((async () => {
+      await testDb.commitCertificate.update({ where: { id: certificate.id }, data: { status: "broken" } });
+      return { count: 0 };
+    }) as unknown as typeof testDb.commitCertificate.updateMany);
+
+    let caught: unknown;
+    try {
+      await commitOrder(testDb, {
+        caseId: dealCase.id, caseVersion: 1, certificateId: certificate.id, certificateHash: certificate.certificateHash,
+        sku: "MAT-10001", quantity: 350, totalValueMinor: 147_000_000, depositMinor: 44_100_000,
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ToolError);
+    expect((caught as ToolError).code).toBe("POLICY_VIOLATION");
   });
 });
 
