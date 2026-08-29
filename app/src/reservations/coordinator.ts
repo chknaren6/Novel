@@ -5,7 +5,7 @@ import { deriveIdempotencyKey } from "@/policy/idempotency";
 import { assertValidCertificateTransition } from "@/state/certificateLifecycle";
 import { assertValidReservationTransition } from "@/state/reservationLifecycle";
 import { runReceiptedAction } from "@/receipts/actionReceipt";
-import { createSandboxOrder, updateCrmStage } from "@/adapters/sandboxErpAdapter";
+import { createSandboxOrder, updateCrmStage, markSandboxOrderRepairPending } from "@/adapters/sandboxErpAdapter";
 import { createDepositCheckout } from "@/adapters/stripeMockAdapter";
 import { sendBackedPromise } from "@/adapters/outboxAdapter";
 import { releaseInventoryHold } from "@/adapters/inventoryAdapter";
@@ -280,4 +280,143 @@ export async function abortCommitment(db: PrismaClient, input: { caseId: string;
     }
   }
   return results;
+}
+
+// Requires a persisted disruption event and consumed certificate; marks the
+// certificate broken without deleting committed history (05-TOOL-CONTRACTS.md
+// "break_certificate"). Idempotent: breaking an already-broken certificate is a no-op.
+export async function breakCertificate(db: PrismaClient, input: { certificateId: string }) {
+  const certificate = await db.commitCertificate.findUniqueOrThrow({ where: { id: input.certificateId } });
+  if (certificate.status === "broken") return certificate;
+  if (certificate.status !== "consumed") {
+    throw new ToolError("POLICY_VIOLATION", `Certificate ${input.certificateId} is not consumed (status=${certificate.status})`, false);
+  }
+  assertValidCertificateTransition("consumed", "broken");
+  // Atomic guard, not a plain update: a concurrent caller could have already broken
+  // (or otherwise transitioned) this certificate between the read above and this
+  // write — see the fix history on commitOrder's consumed-transition and
+  // stripeMockAdapter.ts's expireCheckout for why this codebase treats every
+  // status-transition write this way, not just the read-then-branch above.
+  const updated = await db.commitCertificate.updateMany({
+    where: { id: input.certificateId, status: "consumed" },
+    data: { status: "broken", brokenAt: new Date() },
+  });
+  const current = await db.commitCertificate.findUniqueOrThrow({ where: { id: input.certificateId } });
+  if (updated.count === 0 && current.status !== "broken") {
+    throw new ToolError("POLICY_VIOLATION", `Certificate ${input.certificateId} could not be marked broken (status=${current.status})`, false);
+  }
+  return current;
+}
+
+export interface CompensateCommitmentInput {
+  caseId: string;
+  caseVersion: number;
+  brokenCertificateId: string;
+  disruptedSupplierReservationId: string;
+  affectedLogisticsReservationIds: string[];
+}
+
+// Executes the compensation matrix from 04-DATA-AND-STATE-SPEC.md. Every step is
+// idempotency-keyed by case, version, action type, and resource, so calling this twice
+// for the same disruption produces the same receipts, not duplicates. A disrupted
+// supplier's own availability is never restored (disrupted, not reusable) — only a
+// cancellation receipt is recorded for that domain. A logistics slot's capacity IS
+// restored directly (not via releaseDeliverySlot, which would also try to flip the
+// reservation's status — but a committed reservation is terminal per this file's
+// design note, so this compensates the pool only, leaving the reservation row alone).
+export async function compensateCommitment(db: PrismaClient, input: CompensateCommitmentInput) {
+  const key = (actionType: string, resourceRef: string) =>
+    deriveIdempotencyKey({ caseId: input.caseId, caseVersion: input.caseVersion, actionType, resourceRef });
+
+  const supplierReservation = await db.reservation.findUniqueOrThrow({ where: { id: input.disruptedSupplierReservationId } });
+  const supplierReceipt = await runReceiptedAction(db, {
+    caseId: input.caseId,
+    caseVersion: input.caseVersion,
+    actionType: "supplier.cancel_option",
+    resourceRef: supplierReservation.resourceRef,
+    provider: "supplier",
+    idempotencyKey: key("supplier.cancel_option", supplierReservation.resourceRef),
+    requestHash: input.brokenCertificateId,
+    execute: async () => ({ providerRef: supplierReservation.resourceRef, data: { cancelledReservationId: supplierReservation.id } }),
+  });
+
+  const logisticsReceipts = [];
+  for (const reservationId of input.affectedLogisticsReservationIds) {
+    const reservation = await db.reservation.findUniqueOrThrow({ where: { id: reservationId } });
+    const receipt = await runReceiptedAction(db, {
+      caseId: input.caseId,
+      caseVersion: input.caseVersion,
+      actionType: "logistics.release_slot",
+      resourceRef: reservation.resourceRef,
+      provider: "logistics",
+      idempotencyKey: key("logistics.release_slot", reservation.resourceRef),
+      requestHash: input.brokenCertificateId,
+      execute: async () => {
+        // resourceRef is "PLAN:<planId>" — 2 parts; other domains use 3, don't copy
+        // this arity blind (see logisticsAdapter.ts's releaseDeliverySlot for the
+        // identical comment on the same resourceRef shape).
+        const [, planId] = reservation.resourceRef.split(":");
+        await db.deliveryPlanOption.updateMany({ where: { planId }, data: { capacityRemaining: { increment: reservation.quantityMinor ?? 0 } } });
+        return { providerRef: reservation.resourceRef, data: { releasedReservationId: reservation.id } };
+      },
+    });
+    logisticsReceipts.push(receipt);
+  }
+
+  const orderReceipt = await runReceiptedAction(db, {
+    caseId: input.caseId,
+    caseVersion: input.caseVersion,
+    actionType: "sandbox_order.repair_pending",
+    resourceRef: input.caseId,
+    provider: "sandbox_erp",
+    idempotencyKey: key("sandbox_order.repair_pending", input.caseId),
+    requestHash: input.brokenCertificateId,
+    execute: async () => {
+      await markSandboxOrderRepairPending(db, input.caseId);
+      return { providerRef: null, data: {} };
+    },
+  });
+
+  const crmReceipt = await runReceiptedAction(db, {
+    caseId: input.caseId,
+    caseVersion: input.caseVersion,
+    actionType: "crm.stage_update",
+    resourceRef: input.caseId,
+    provider: "sandbox_crm",
+    idempotencyKey: key("crm.stage_update", input.caseId),
+    requestHash: input.brokenCertificateId,
+    execute: async () => {
+      const event = await updateCrmStage(db, { caseId: input.caseId, stage: "repair_needed", note: `Certificate ${input.brokenCertificateId} broken by supplier disruption` });
+      return { providerRef: event.id, data: {} };
+    },
+  });
+
+  return { supplierReceipt, logisticsReceipts, orderReceipt, crmReceipt };
+}
+
+export interface TerminalStateReport {
+  caseId: string;
+  caseStatus: string;
+  certificates: Array<{ id: string; status: string }>;
+  reservations: Array<{ id: string; domain: string; status: string }>;
+  receipts: Array<{ id: string; actionType: string; status: string }>;
+}
+
+// Reads database state and returns a deterministic expected-versus-actual report. It
+// never asks an LLM to judge correctness (05-TOOL-CONTRACTS.md "verify_terminal_state")
+// — the evaluation runner (Task 31) compares this report's fields directly.
+export async function verifyTerminalState(db: PrismaClient, caseId: string): Promise<TerminalStateReport> {
+  const [dealCase, certificates, reservations, receipts] = await Promise.all([
+    db.dealCase.findUniqueOrThrow({ where: { id: caseId } }),
+    db.commitCertificate.findMany({ where: { caseId } }),
+    db.reservation.findMany({ where: { caseId } }),
+    db.actionReceipt.findMany({ where: { caseId } }),
+  ]);
+  return {
+    caseId,
+    caseStatus: dealCase.status,
+    certificates: certificates.map((c) => ({ id: c.id, status: c.status })),
+    reservations: reservations.map((r) => ({ id: r.id, domain: r.domain, status: r.status })),
+    receipts: receipts.map((r) => ({ id: r.id, actionType: r.actionType, status: r.status })),
+  };
 }

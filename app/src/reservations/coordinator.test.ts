@@ -2,11 +2,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { testDb, resetTestDb } from "@/lib/testDb";
-import { prepareCommitCertificate, commitOrder, abortCommitment } from "./coordinator";
+import { prepareCommitCertificate, commitOrder, abortCommitment, breakCertificate, compensateCommitment, verifyTerminalState } from "./coordinator";
 import { holdInventory } from "@/adapters/inventoryAdapter";
 import { holdCreditEnvelope } from "@/adapters/creditAdapter";
+import { holdSupplierOption } from "@/adapters/supplierAdapter";
+import { holdDeliverySlot } from "@/adapters/logisticsAdapter";
 import { ToolError, type ReservationDomain } from "@/lib/types";
-import { toJsonColumn } from "@/lib/json-column";
+import { toJsonColumn, fromJsonColumn } from "@/lib/json-column";
 import { deriveIdempotencyKey } from "@/policy/idempotency";
 
 async function seedReadyCase() {
@@ -197,15 +199,26 @@ describe("commitOrder", () => {
     const { dealCase, reservationIds } = await seedReadyCase();
     const certificate = await prepareCommitCertificate(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", reservationIds, requiredDomains: ["inventory", "credit"] });
 
-    vi.spyOn(testDb.commitCertificate, "updateMany").mockImplementationOnce((async () => {
+    // vi.spyOn + vi.restoreAllMocks on a Prisma model delegate leaves `updateMany`
+    // permanently undefined for the rest of the process once restored (Prisma's
+    // delegate isn't a plain object the spy/restore round-trip is safe against) —
+    // reassign and restore the method by hand instead so later tests/files that call
+    // testDb.commitCertificate.updateMany for real aren't left broken.
+    const originalUpdateMany = testDb.commitCertificate.updateMany.bind(testDb.commitCertificate);
+    testDb.commitCertificate.updateMany = (async () => {
       await testDb.commitCertificate.update({ where: { id: certificate.id }, data: { status: "consumed", consumedAt: new Date() } });
       return { count: 0 };
-    }) as unknown as typeof testDb.commitCertificate.updateMany);
+    }) as unknown as typeof testDb.commitCertificate.updateMany;
 
-    const result = await commitOrder(testDb, {
-      caseId: dealCase.id, caseVersion: 1, certificateId: certificate.id, certificateHash: certificate.certificateHash,
-      sku: "MAT-10001", quantity: 350, totalValueMinor: 147_000_000, depositMinor: 44_100_000,
-    });
+    let result;
+    try {
+      result = await commitOrder(testDb, {
+        caseId: dealCase.id, caseVersion: 1, certificateId: certificate.id, certificateHash: certificate.certificateHash,
+        sku: "MAT-10001", quantity: 350, totalValueMinor: 147_000_000, depositMinor: 44_100_000,
+      });
+    } finally {
+      testDb.commitCertificate.updateMany = originalUpdateMany;
+    }
 
     expect(result.orderReceipt.status).toBe("succeeded");
     expect(result.checkoutReceipt.status).toBe("succeeded");
@@ -223,10 +236,13 @@ describe("commitOrder", () => {
     const { dealCase, reservationIds } = await seedReadyCase();
     const certificate = await prepareCommitCertificate(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", reservationIds, requiredDomains: ["inventory", "credit"] });
 
-    vi.spyOn(testDb.commitCertificate, "updateMany").mockImplementationOnce((async () => {
+    // See the manual-reassignment comment on the previous test for why this doesn't
+    // use vi.spyOn/restoreAllMocks against the Prisma model delegate.
+    const originalUpdateMany = testDb.commitCertificate.updateMany.bind(testDb.commitCertificate);
+    testDb.commitCertificate.updateMany = (async () => {
       await testDb.commitCertificate.update({ where: { id: certificate.id }, data: { status: "broken" } });
       return { count: 0 };
-    }) as unknown as typeof testDb.commitCertificate.updateMany);
+    }) as unknown as typeof testDb.commitCertificate.updateMany;
 
     let caught: unknown;
     try {
@@ -236,6 +252,8 @@ describe("commitOrder", () => {
       });
     } catch (error) {
       caught = error;
+    } finally {
+      testDb.commitCertificate.updateMany = originalUpdateMany;
     }
     expect(caught).toBeInstanceOf(ToolError);
     expect((caught as ToolError).code).toBe("POLICY_VIOLATION");
@@ -283,5 +301,67 @@ describe("abortCommitment", () => {
 
     const untouchedReservation = await testDb.reservation.findUniqueOrThrow({ where: { id: inventoryReservationId } });
     expect(untouchedReservation.status).toBe("held"); // the failed release never transitioned it
+  });
+});
+
+describe("breakCertificate", () => {
+  beforeEach(resetTestDb);
+
+  it("marks a consumed certificate broken without deleting it", async () => {
+    const { dealCase, reservationIds } = await seedReadyCase();
+    const certificate = await prepareCommitCertificate(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", reservationIds, requiredDomains: ["inventory", "credit"] });
+    await commitOrder(testDb, { caseId: dealCase.id, caseVersion: 1, certificateId: certificate.id, certificateHash: certificate.certificateHash, sku: "MAT-10001", quantity: 350, totalValueMinor: 147_000_000, depositMinor: 44_100_000 });
+
+    const broken = await breakCertificate(testDb, { certificateId: certificate.id });
+    expect(broken.status).toBe("broken");
+    const stillThere = await testDb.commitCertificate.findUniqueOrThrow({ where: { id: certificate.id } });
+    // reservationIds is a JSON-in-TEXT column — parse it through fromJsonColumn rather
+    // than comparing the raw stored string against the plain array.
+    expect(fromJsonColumn<string[]>(stillThere.reservationIds)).toEqual(reservationIds);
+  });
+
+  it("is idempotent when called twice", async () => {
+    const { dealCase, reservationIds } = await seedReadyCase();
+    const certificate = await prepareCommitCertificate(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", reservationIds, requiredDomains: ["inventory", "credit"] });
+    await commitOrder(testDb, { caseId: dealCase.id, caseVersion: 1, certificateId: certificate.id, certificateHash: certificate.certificateHash, sku: "MAT-10001", quantity: 350, totalValueMinor: 147_000_000, depositMinor: 44_100_000 });
+    await breakCertificate(testDb, { certificateId: certificate.id });
+    const second = await breakCertificate(testDb, { certificateId: certificate.id });
+    expect(second.status).toBe("broken");
+  });
+});
+
+describe("compensateCommitment", () => {
+  beforeEach(resetTestDb);
+
+  it("records exactly one receipt per affected domain even if called twice", async () => {
+    const { dealCase } = await seedReadyCase();
+    await testDb.supplierOption.create({ data: { supplierId: "VEND-2003", sku: "MAT-10001", availableQuantity: 151, unitCostMinor: 289_137, leadDays: 18, optionTtlSeconds: 900, status: "available" } });
+    await testDb.deliveryPlanOption.create({ data: { planId: "RT-BLR-HYD", originWarehouseId: "WH-BLR", destinationId: "ZONE-SOUTH", deliveredQuantity: 350, deliveryDate: new Date("2026-09-12"), costMinor: 400_000, splitShipment: true, capacityRemaining: 350 } });
+
+    const supplierReservation = await holdSupplierOption(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", supplierId: "VEND-2003", sku: "MAT-10001", quantity: 151, maxUnitCostMinor: 300_000, maxLeadDays: 21, ttlSeconds: 900 });
+    const logisticsReservation = await holdDeliverySlot(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", planId: "RT-BLR-HYD", quantity: 151, ttlSeconds: 900 });
+    await testDb.sandboxOrder.create({ data: { caseId: dealCase.id, certificateId: "CERT-1", sku: "MAT-10001", quantity: 350, totalValueMinor: 147_000_000, status: "accepted" } });
+
+    const input = { caseId: dealCase.id, caseVersion: 2, brokenCertificateId: "CERT-1", disruptedSupplierReservationId: supplierReservation.id, affectedLogisticsReservationIds: [logisticsReservation.id] };
+    const first = await compensateCommitment(testDb, input);
+    const second = await compensateCommitment(testDb, input);
+    expect(first.supplierReceipt.status).toBe("succeeded");
+    expect(second.supplierReceipt.id).toBe(first.supplierReceipt.id); // same receipt row, not a duplicate
+
+    const plan = await testDb.deliveryPlanOption.findUniqueOrThrow({ where: { planId: "RT-BLR-HYD" } });
+    expect(plan.capacityRemaining).toBe(350 - 151 + 151); // held then released back once, not twice
+  });
+});
+
+describe("verifyTerminalState", () => {
+  beforeEach(resetTestDb);
+
+  it("reports current case, certificate, reservation, and receipt state without any model call", async () => {
+    const { dealCase, reservationIds } = await seedReadyCase();
+    const certificate = await prepareCommitCertificate(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash: "hash-1", reservationIds, requiredDomains: ["inventory", "credit"] });
+    const report = await verifyTerminalState(testDb, dealCase.id);
+    expect(report.caseId).toBe(dealCase.id);
+    expect(report.certificates.map((c) => c.id)).toContain(certificate.id);
+    expect(report.reservations).toHaveLength(2);
   });
 });
