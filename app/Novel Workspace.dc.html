@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;padding:0;height:100%;background:#FBFAF6;font-family:'Familjen Grotesk',system-ui,sans-serif;color:#191A17;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:#1F5B4B;text-decoration:none}
+a:hover{color:#191A17}
+@keyframes nvDot{0%,100%{transform:scale(.66);opacity:.26}45%{transform:scale(1);opacity:1}}
+@keyframes nvCaret{0%,100%{opacity:0}50%{opacity:1}}
+@keyframes nvDash{to{stroke-dashoffset:-18}}
+@keyframes nvIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes nvUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#DEDBD0;border-radius:6px;border:3px solid transparent;background-clip:content-box}
+</style>
+</helmet>
+
+<div style="height:100vh;display:flex;flex-direction:column;overflow:hidden;background:#FBFAF6">
+
+<div style="flex:none;display:flex;align-items:center;gap:{{ hGap }}px;padding:0 {{ padX }}px;height:{{ headerH }}px;border-bottom:1px solid #E4E2D9;position:relative;z-index:30">
+  <span style="font:500 18px 'Source Serif 4',Georgia,serif;letter-spacing:-.01em">Novel</span>
+  <div style="display:flex;gap:{{ hGap }}px;min-width:0;overflow-x:auto">
+    <sc-for list="{{ navItems }}" as="n" hint-placeholder-count="3">
+      <button onClick="{{ n.go }}" style="font:500 {{ navSize }}px 'Familjen Grotesk',sans-serif;padding:0;border:none;background:transparent;cursor:pointer;position:relative;white-space:nowrap;height:{{ headerH }}px;color:{{ n.fg }}">
+        {{ n.label }}
+        <span style="position:absolute;left:0;right:0;bottom:0;height:1.5px;background:{{ n.underline }}"></span>
+      </button>
+    </sc-for>
+  </div>
+  <div style="flex:1"></div>
+  <sc-if value="{{ showCasesBtn }}" hint-placeholder-val="{{ true }}">
+    <button onClick="{{ toggleRail }}" style="font:500 13px 'Familjen Grotesk',sans-serif;background:transparent;border:1px solid #E4E2D9;border-radius:7px;padding:7px 12px;cursor:pointer;white-space:nowrap;color:{{ railBtnFg }}">{{ railBtnLabel }}</button>
+  </sc-if>
+  <sc-if value="{{ showNew }}" hint-placeholder-val="{{ true }}">
+    <button onClick="{{ newRequest }}" style="font:500 13px 'Familjen Grotesk',sans-serif;background:#1F5B4B;color:#fff;border:none;border-radius:7px;padding:8px 13px;cursor:pointer;white-space:nowrap">{{ newLabel }}</button>
+  </sc-if>
+  <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}">
+    <span style="font:400 13px 'Familjen Grotesk',sans-serif;color:#77796D;white-space:nowrap">{{ caseName }}</span>
+  </sc-if>
+  <button onClick="{{ openProfile }}" style="display:flex;align-items:center;gap:9px;background:transparent;border:none;cursor:pointer;padding:4px;border-radius:20px" style-hover="background:#F0EEE6">
+    <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}">
+      <span style="font:500 13px 'Familjen Grotesk',sans-serif;white-space:nowrap">Rhea Kulkarni</span>
+    </sc-if>
+    <span style="width:30px;height:30px;border-radius:50%;border:1px solid #E4E2D9;background:{{ avatarBg }};color:{{ avatarFg }};font:500 12px 'Familjen Grotesk',sans-serif;display:flex;align-items:center;justify-content:center">RK</span>
+  </button>
+</div>
+
+<div style="flex:1;display:flex;min-height:0;position:relative">
+
+  <sc-if value="{{ showRail }}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute;top:0;left:0;bottom:0;z-index:28;width:{{ railW }};background:#FBFAF6;border-right:1px solid #E4E2D9;box-shadow:12px 0 30px rgba(25,26,23,.08);display:flex;flex-direction:column;min-height:0;animation:nvIn .25s ease both">
+      <div style="flex:none;display:flex;align-items:center;padding:18px 18px 8px">
+        <span style="font:400 11px 'IBM Plex Mono',monospace;letter-spacing:.16em;color:#8D8F82">CASES</span>
+        <span style="flex:1"></span>
+        <button onClick="{{ toggleRail }}" style="font:400 17px 'Familjen Grotesk',sans-serif;background:transparent;border:none;color:#8D8F82;cursor:pointer;padding:0 4px">✕</button>
+      </div>
+      <div style="flex:1;overflow:auto;padding:0 10px 20px">
+        <sc-for list="{{ cases }}" as="c" hint-placeholder-count="5">
+          <div onClick="{{ c.go }}" style="padding:13px 12px 14px;border-radius:8px;cursor:pointer;background:{{ c.bg }}" style-hover="background:#F2F0E8">
+            <div style="font:500 14.5px 'Familjen Grotesk',sans-serif">{{ c.customer }}</div>
+            <div style="font:400 13px/1.5 'Familjen Grotesk',sans-serif;color:#8D8F82;margin-top:3px">{{ c.line }}</div>
+            <div style="font:500 12.5px 'Familjen Grotesk',sans-serif;margin-top:7px;color:{{ c.stateFg }}">{{ c.state }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <div style="flex:1;min-width:{{ centreMin }}px;display:flex;flex-direction:column;position:relative;overflow:hidden">
+
+    <sc-if value="{{ showArchived }}" hint-placeholder-val="{{ true }}">
+      <div style="flex:1;min-height:0;overflow-y:auto;animation:nvIn .3s ease both">
+        <div style="max-width:600px;margin:0 auto;padding:{{ padY }}px {{ padX }}px 64px">
+          <div style="font:400 11px 'IBM Plex Mono',monospace;letter-spacing:.16em;color:#8D8F82">CLOSED CASE</div>
+          <h2 style="font:500 {{ h2Size }}px/1.22 'Source Serif 4',Georgia,serif;letter-spacing:-.008em;margin:12px 0 0">{{ arch.customer }}</h2>
+          <div style="font:400 16px/1.7 'Familjen Grotesk',sans-serif;color:#585A50;margin-top:10px">{{ arch.line }}</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:20px">
+            <span style="width:9px;height:9px;border-radius:50%;background:{{ arch.dot }}"></span>
+            <span style="font:500 16px 'Familjen Grotesk',sans-serif;color:{{ arch.dot }}">{{ arch.state }}</span>
+          </div>
+          <p style="font:400 15.5px/1.75 'Familjen Grotesk',sans-serif;color:#585A50;margin:18px 0 0;text-wrap:pretty">{{ arch.detail }}</p>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:26px">
+            <button onClick="{{ backToLive }}" style="font:500 14px 'Familjen Grotesk',sans-serif;color:#fff;background:#1F5B4B;border:none;border-radius:8px;padding:12px 20px;cursor:pointer">Back to the open case</button>
+            <button onClick="{{ newRequest }}" style="font:500 14px 'Familjen Grotesk',sans-serif;background:transparent;border:1px solid #E4E2D9;border-radius:8px;padding:11px 18px;cursor:pointer">Start a new request</button>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ showHome }}" hint-placeholder-val="{{ true }}">
+      <div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;animation:nvIn .4s ease both">
+        <div style="width:100%;max-width:620px;margin:auto;padding:{{ padY }}px {{ padX }}px 56px">
+          <h1 style="font:500 {{ h1Size }}px/1.14 'Source Serif 4',Georgia,serif;letter-spacing:-.012em;margin:0 0 14px">What do you need to promise?</h1>
+          <p style="font:400 16.5px/1.7 'Familjen Grotesk',sans-serif;color:#585A50;margin:0 0 30px;text-wrap:pretty">Six checks, and a hold placed against each one. Nothing is promised until all six answer.</p>
+          <div style="border-bottom:1.5px solid #1F5B4B;padding-bottom:14px">
+            <div style="font:400 {{ qSize }}px/1.6 'Familjen Grotesk',sans-serif;min-height:56px;text-wrap:pretty">{{ draft }}<span style="display:inline-block;width:1.5px;height:19px;background:#1F5B4B;vertical-align:-3px;margin-left:2px;animation:nvCaret 1.1s steps(1,end) infinite"></span></div>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-top:18px">
+            <button onClick="{{ submit }}" style="font:500 14.5px 'Familjen Grotesk',sans-serif;color:#fff;background:#1F5B4B;border:none;border-radius:8px;padding:13px 24px;cursor:pointer">Check and commit</button>
+            <span style="font:400 13.5px 'Familjen Grotesk',sans-serif;color:#8D8F82">Attach a quote request</span>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ showRun }}" hint-placeholder-val="{{ true }}">
+      <div style="flex:1;overflow:auto">
+        <div style="max-width:{{ colMax }}px;margin:0 auto;padding:{{ padY }}px {{ padX }}px {{ runPadBottom }}px">
+
+          <div style="display:flex;align-items:baseline;gap:14px">
+            <span style="font:400 11px 'IBM Plex Mono',monospace;letter-spacing:.16em;color:#8D8F82">QUESTION</span>
+            <span style="flex:1"></span>
+            <button onClick="{{ toggleQuestion }}" style="font:500 12.5px 'Familjen Grotesk',sans-serif;background:transparent;border:none;color:#6E7065;cursor:pointer;padding:0">{{ questionToggle }}</button>
+          </div>
+          <div style="background:#EFEDE3;border-left:2px solid #1F5B4B;border-radius:4px 12px 12px 4px;padding:18px 20px;margin-top:12px">
+            <div style="font:500 {{ qSize }}px/1.55 'Familjen Grotesk',sans-serif;color:#191A17;text-wrap:pretty">{{ questionText }}</div>
+            <div style="font:400 12.5px 'Familjen Grotesk',sans-serif;color:#77796D;margin-top:10px">Asked by you · today, 14:22</div>
+          </div>
+          <sc-if value="{{ questionOpen }}" hint-placeholder-val="{{ true }}">
+            <div style="margin-top:18px;display:flex;flex-wrap:wrap;gap:18px 36px">
+              <sc-for list="{{ questionMeta }}" as="q" hint-placeholder-count="5">
+                <div>
+                  <div style="font:400 10.5px 'IBM Plex Mono',monospace;letter-spacing:.13em;color:#8D8F82">{{ q.k }}</div>
+                  <div style="font:500 14.5px 'Familjen Grotesk',sans-serif;margin-top:5px">{{ q.v }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <div style="margin-top:34px;padding-top:28px;border-top:1px solid #E4E2D9">
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;min-height:24px">
+              <span style="display:flex;align-items:center;gap:10px">
+                <sc-for list="{{ dots }}" as="d" hint-placeholder-count="6">
+                  <span title="{{ d.name }}" style="width:9px;height:9px;border-radius:50%;background:{{ d.bg }};animation:{{ d.anim }};animation-delay:{{ d.delay }}"></span>
+                </sc-for>
+              </span>
+              <span style="font:400 14.5px 'Familjen Grotesk',sans-serif;color:{{ dotsFg }}">{{ dotsLabel }}</span>
+            </div>
+          </div>
+
+          <sc-if value="{{ settled }}" hint-placeholder-val="{{ true }}">
+            <div style="margin-top:32px;animation:nvIn .5s ease both">
+              <div style="font:400 11px 'IBM Plex Mono',monospace;letter-spacing:.16em;color:#8D8F82">ANSWER</div>
+              <h2 style="font:500 {{ h2Size }}px/1.22 'Source Serif 4',Georgia,serif;letter-spacing:-.012em;margin:12px 0 0">Yes — at ₹15,500, with 70% paid up front.</h2>
+              <p style="font:400 17px/1.7 'Familjen Grotesk',sans-serif;color:#585A50;margin:14px 0 0;text-wrap:pretty">327 units arrive 5 September, the last 73 on 10 September. Every unit is held: 327 from stock, 73 from a reserved slot on Line 2.</p>
+              <div style="display:flex;flex-wrap:wrap;gap:26px 48px;margin-top:26px">
+                <sc-for list="{{ changes }}" as="c" hint-placeholder-count="3">
+                  <div>
+                    <div style="font:400 10.5px 'IBM Plex Mono',monospace;letter-spacing:.13em;color:#8D8F82">{{ c.field }}</div>
+                    <div style="font:500 21px 'Source Serif 4',Georgia,serif;margin-top:6px">{{ c.to }}</div>
+                    <div style="font:400 13px 'IBM Plex Mono',monospace;color:#8D8F82;margin-top:3px;text-decoration:line-through">{{ c.from }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+
+          <div style="margin-top:36px;padding-top:26px;border-top:1px solid #E4E2D9">
+            <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px">
+              <span style="font:400 11px 'IBM Plex Mono',monospace;letter-spacing:.16em;color:#8D8F82">THE SIX CHECKS</span>
+              <span style="flex:1"></span>
+              <sc-if value="{{ showViewToggle }}" hint-placeholder-val="{{ true }}">
+                <div style="display:flex;gap:14px">
+                  <sc-for list="{{ viewOpts }}" as="v" hint-placeholder-count="2">
+                    <button onClick="{{ v.go }}" style="font:500 12.5px 'Familjen Grotesk',sans-serif;background:transparent;border:none;padding:0;cursor:pointer;position:relative;color:{{ v.fg }}">
+                      {{ v.label }}
+                      <span style="position:absolute;left:0;right:0;bottom:-4px;height:1.5px;background:{{ v.underline }}"></span>
+                    </button>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <button onClick="{{ toggleChecks }}" style="font:500 12.5px 'Familjen Grotesk',sans-serif;background:transparent;border:none;color:#6E7065;cursor:pointer;padding:0">{{ checksToggle }}</button>
+            </div>
+
+            <sc-if value="{{ showDiagram }}" hint-placeholder-val="{{ true }}">
+              <div style="font:400 12.5px 'Familjen Grotesk',sans-serif;color:#8D8F82;margin-top:14px">Hover a box for the reasoning</div>
+              <div ref="{{ graphRef }}" style="position:relative;width:100%;overflow-x:auto;margin-top:16px;height:{{ graphH }}px">
+                <div style="position:absolute;top:0;width:900px;height:540px;transform-origin:top left;transform:scale({{ graphScale }});left:{{ graphLeft }}px">
+                  <svg width="900" height="540" viewBox="0 0 900 540" style="position:absolute;inset:0;overflow:visible">
+                    <sc-for list="{{ pipes }}" as="p" hint-placeholder-count="9">
+                      <path d="{{ p.d }}" fill="none" stroke="{{ p.stroke }}" stroke-width="1.2" stroke-dasharray="{{ p.dash }}" style="animation:{{ p.anim }}"></path>
+                    </sc-for>
+                  </svg>
+                  <sc-for list="{{ nodes }}" as="n" hint-placeholder-count="7">
+                    <div onMouseEnter="{{ n.enter }}" onMouseLeave="{{ n.leave }}" style="position:absolute;width:180px;background:#fff;border:1px solid;border-radius:10px;padding:13px 14px 14px;transition:border-color .25s,box-shadow .25s,opacity .4s;left:{{ n.x }}px;top:{{ n.y }}px;border-color:{{ n.border }};box-shadow:{{ n.shadow }};opacity:{{ n.op }}">
+                      <div style="display:flex;align-items:center;gap:8px">
+                        <span style="width:7px;height:7px;border-radius:50%;background:{{ n.dot }}"></span>
+                        <span style="font:600 14.5px 'Familjen Grotesk',sans-serif">{{ n.name }}</span>
+                      </div>
+                      <div style="font:400 12.5px/1.45 'Familjen Grotesk',sans-serif;color:{{ n.statusFg }};margin-top:7px">{{ n.status }}</div>
+                    </div>
+                  </sc-for>
+                  <sc-if value="{{ tip.on }}" hint-placeholder-val="{{ true }}">
+                    <div style="position:absolute;width:330px;background:#23241F;color:#fff;border-radius:10px;padding:16px 18px 17px;z-index:8;box-shadow:0 14px 36px rgba(25,26,23,.24);animation:nvIn .15s ease both;left:{{ tip.x }}px;top:{{ tip.y }}px">
+                      <div style="font:400 10.5px 'IBM Plex Mono',monospace;letter-spacing:.13em;color:#A9AA9C">{{ tip.name }}</div>
+                      <div style="font:400 14px/1.6 'Familjen Grotesk',sans-serif;margin-top:9px;text-wrap:pretty">{{ tip.why }}</div>
+                      <div style="font:400 11.5px/1.6 'IBM Plex Mono',monospace;color:#A9AA9C;margin-top:11px;padding-top:10px;border-top:1px solid #3A3C33">{{ tip.evidence }}</div>
+                    </div>
+                  </sc-if>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ showList }}" hint-placeholder-val="{{ true }}">
+              <div style="margin-top:16px">
+                <sc-for list="{{ modules }}" as="m" hint-placeholder-count="6">
+                  <div style="padding:16px 0 17px;border-bottom:1px solid #EDEAE1;transition:opacity .45s;opacity:{{ m.op }}">
+                    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px">
+                      <span style="flex:none;font:600 15px 'Familjen Grotesk',sans-serif;min-width:104px">{{ m.name }}</span>
+                      <span style="flex:1 1 240px;min-width:200px;font:400 15px/1.6 'Familjen Grotesk',sans-serif;text-wrap:pretty">{{ m.line }}</span>
+                      <span style="flex:none;margin-left:auto;font:500 13px 'Familjen Grotesk',sans-serif;color:{{ m.statusFg }}">{{ m.status }}</span>
+                    </div>
+                    <sc-if value="{{ m.showWhy }}" hint-placeholder-val="{{ true }}">
+                      <div style="font:400 14px/1.7 'Familjen Grotesk',sans-serif;color:#8D8F82;margin-top:8px;text-wrap:pretty">{{ m.why }}</div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+
+          <sc-if value="{{ settled }}" hint-placeholder-val="{{ true }}">
+            <div style="margin-top:36px;padding-top:26px;border-top:1px solid #E4E2D9">
+              <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px">
+                <span style="font:400 11px 'IBM Plex Mono',monospace;letter-spacing:.16em;color:#8D8F82">WHAT HOLDS THIS PROMISE UP</span>
+                <span style="flex:1"></span>
+                <button onClick="{{ toggleRecord }}" style="font:500 12.5px 'Familjen Grotesk',sans-serif;background:transparent;border:none;color:#6E7065;cursor:pointer;padding:0">{{ recordToggle }}</button>
+              </div>
+              <div style="margin-top:12px">
+                <sc-for list="{{ backing }}" as="b" hint-placeholder-count="5">
+                  <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 18px;padding:13px 0;border-bottom:1px solid #EDEAE1">
+                    <span style="flex:1 1 240px;min-width:200px;font:400 15px 'Familjen Grotesk',sans-serif">{{ b.title }}</span>
+                    <span style="flex:none;margin-left:auto;font:400 13px 'IBM Plex Mono',monospace;color:#8D8F82">{{ b.detail }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <sc-if value="{{ recordOpen }}" hint-placeholder-val="{{ true }}">
+                <div style="margin-top:24px">
+                  <div style="font:400 11px 'IBM Plex Mono',monospace;letter-spacing:.16em;color:#8D8F82;margin-bottom:14px">IN ORDER</div>
+                  <sc-for list="{{ timeline }}" as="e" hint-placeholder-count="11">
+                    <div style="display:flex;gap:14px">
+                      <span style="flex:none;width:46px;font:400 12.5px 'IBM Plex Mono',monospace;color:#8D8F82;padding-top:2px">{{ e.t }}</span>
+                      <span style="flex:none;display:flex;flex-direction:column;align-items:center">
+                        <span style="width:6px;height:6px;border-radius:50%;background:{{ e.dot }};margin-top:7px"></span>
+                        <span style="flex:1;width:1px;background:#EDEAE1"></span>
+                      </span>
+                      <span style="flex:1;padding-bottom:18px">
+                        <span style="display:block;font:400 14.5px 'Familjen Grotesk',sans-serif">{{ e.title }}</span>
+                        <span style="display:block;font:400 12.5px/1.6 'Familjen Grotesk',sans-serif;color:#8D8F82;margin-top:3px">{{ e.detail }}</span>
+                      </span>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:24px">
+                <button onClick="{{ closeNegotiation }}" style="font:500 14px 'Familjen Grotesk',sans-serif;color:#fff;background:#1F5B4B;border:none;border-radius:8px;padding:12px 20px;cursor:pointer">Send to Sundara</button>
+                <button style="font:500 14px 'Familjen Grotesk',sans-serif;background:transparent;border:1px solid #E4E2D9;border-radius:8px;padding:11px 18px;cursor:pointer">Download the certificate</button>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+
+      <sc-if value="{{ followCollapsed }}" hint-placeholder-val="{{ true }}">
+        <button onClick="{{ openFollow }}" style="position:absolute;z-index:25;bottom:{{ launchBottom }}px;right:{{ launchRight }}px;left:{{ launchLeft }};display:flex;align-items:center;justify-content:center;gap:9px;background:#fff;border:1px solid #E4E2D9;border-radius:{{ launchRadius }}px;box-shadow:0 10px 26px rgba(25,26,23,.12);padding:12px 18px;cursor:pointer;animation:nvUp .3s ease both">
+          <span style="width:7px;height:7px;border-radius:50%;background:{{ followDotBg }}"></span>
+          <span style="font:500 14px 'Familjen Grotesk',sans-serif">{{ followLaunchLabel }}</span>
+          <span style="font:400 12px 'Familjen Grotesk',sans-serif;color:#8D8F82">{{ followLaunchHint }}</span>
+        </button>
+      </sc-if>
+
+      <sc-if value="{{ followExpanded }}" hint-placeholder-val="{{ true }}">
+        <div style="position:absolute;z-index:27;bottom:{{ panelBottom }}px;right:{{ panelRight }};left:{{ panelLeft }};width:{{ panelW }};max-height:{{ panelMaxH }};display:flex;flex-direction:column;background:#fff;border:1px solid #E4E2D9;border-radius:14px;box-shadow:0 20px 50px rgba(25,26,23,.18);animation:nvUp .28s cubic-bezier(.2,.8,.2,1) both">
+          <div style="flex:none;display:flex;align-items:center;gap:10px;padding:15px 16px 12px;border-bottom:1px solid #EDEAE1">
+            <span style="font:600 15px 'Familjen Grotesk',sans-serif">Follow up</span>
+            <span style="font:400 12px 'Familjen Grotesk',sans-serif;color:{{ followStateFg }}">{{ followState }}</span>
+            <span style="flex:1"></span>
+            <button onClick="{{ closeFollow }}" style="font:400 17px 'Familjen Grotesk',sans-serif;background:transparent;border:none;color:#8D8F82;cursor:pointer;padding:0 4px">✕</button>
+          </div>
+          <div style="flex:1;overflow:auto;padding:14px 16px 6px;min-height:0">
+            <sc-if value="{{ followBusy }}" hint-placeholder-val="{{ true }}">
+              <div style="font:400 14px/1.7 'Familjen Grotesk',sans-serif;color:#8D8F82;text-wrap:pretty">The checks are still running. Questions open as soon as there is an answer to question.</div>
+            </sc-if>
+            <sc-if value="{{ followHeld }}" hint-placeholder-val="{{ true }}">
+              <div style="font:400 14px/1.7 'Familjen Grotesk',sans-serif;color:#A26A16;text-wrap:pretty">Waiting on the motor weight. Confirm it and the checks will finish.</div>
+            </sc-if>
+            <sc-if value="{{ followReady }}" hint-placeholder-val="{{ true }}">
+              <div>
+                <div style="font:400 14px/1.7 'Familjen Grotesk',sans-serif;color:#585A50;text-wrap:pretty">Answers come from the six checks, not from a fresh guess.</div>
+                <div style="margin-top:14px">
+                  <sc-for list="{{ suggestions }}" as="s" hint-placeholder-count="3">
+                    <div style="padding:12px 0;border-top:1px solid #EDEAE1;font:400 14px/1.55 'Familjen Grotesk',sans-serif;color:#585A50;cursor:pointer" style-hover="color:#191A17">{{ s }}</div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ followDone }}" hint-placeholder-val="{{ true }}">
+              <div style="font:400 14px/1.7 'Familjen Grotesk',sans-serif;color:#585A50;text-wrap:pretty">The counteroffer has gone to Sundara. This case is closed to further changes — reopen it from the case list if they come back.</div>
+            </sc-if>
+          </div>
+          <sc-if value="{{ followOpen }}" hint-placeholder-val="{{ true }}">
+            <div style="flex:none;padding:12px 16px 16px">
+              <div style="display:flex;align-items:center;gap:9px;border:1px solid #E4E2D9;border-radius:10px;padding:8px 8px 8px 13px">
+                <span style="flex:1;font:400 14px 'Familjen Grotesk',sans-serif;color:#8D8F82">Ask, or propose new terms</span>
+                <button style="font:500 13px 'Familjen Grotesk',sans-serif;color:#fff;background:#1F5B4B;border:none;border-radius:7px;padding:8px 14px;cursor:pointer">Send</button>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ blocked }}" hint-placeholder-val="{{ true }}">
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(25,26,23,.34);z-index:34;padding:20px">
+          <div style="width:540px;max-width:100%;max-height:100%;overflow:auto;background:#fff;border-radius:14px;box-shadow:0 24px 60px rgba(25,26,23,.24);padding:26px 26px 24px;animation:nvUp .28s cubic-bezier(.2,.8,.2,1) both">
+            <div style="font:400 11px 'IBM Plex Mono',monospace;letter-spacing:.16em;color:#A26A16">WE NEED ONE THING FROM YOU</div>
+            <h3 style="font:500 {{ h3Size }}px/1.28 'Source Serif 4',Georgia,serif;letter-spacing:-.008em;margin:12px 0 0">What does one motor weigh?</h3>
+            <p style="font:400 15.5px/1.75 'Familjen Grotesk',sans-serif;color:#585A50;margin:11px 0 0;text-wrap:pretty">Freight cannot be priced without it, and no source on file carries a weight for MTR-2K2-B. Until it is confirmed, Novel will not put a delivery date in front of Sundara.</p>
+            <div style="display:flex;align-items:baseline;gap:14px;border-bottom:1px solid #E4E2D9;padding:14px 0;margin-top:16px">
+              <span style="font:400 12px 'IBM Plex Mono',monospace;letter-spacing:.12em;color:#8D8F82">2024 DATASHEET</span>
+              <span style="flex:1"></span>
+              <span style="font:500 20px 'Source Serif 4',Georgia,serif">41.5 kg</span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:9px;margin-top:20px">
+              <button onClick="{{ attest }}" style="font:500 14px 'Familjen Grotesk',sans-serif;color:#fff;background:#1F5B4B;border:none;border-radius:8px;padding:12px 20px;cursor:pointer">Confirm 41.5 kg per motor</button>
+              <button style="font:500 14px 'Familjen Grotesk',sans-serif;background:transparent;border:1px solid #E4E2D9;border-radius:8px;padding:11px 18px;cursor:pointer">Upload a weight sheet</button>
+              <button onClick="{{ reset }}" style="font:500 14px 'Familjen Grotesk',sans-serif;background:transparent;border:none;color:#6E7065;padding:11px 6px;cursor:pointer">Stop here</button>
+            </div>
+            <div style="font:400 12.5px/1.6 'Familjen Grotesk',sans-serif;color:#8D8F82;margin-top:12px">Recorded in your name and attached to the certificate.</div>
+          </div>
+        </div>
+      </sc-if>
+    </sc-if>
+
+    <sc-if value="{{ showMarket }}" hint-placeholder-val="{{ true }}">
+      <div style="flex:1;overflow:auto">
+        <div style="max-width:{{ colMax }}px;margin:0 auto;padding:{{ padY }}px {{ padX }}px 64px">
+
+          <sc-if value="{{ mGuide }}" hint-placeholder-val="{{ true }}">
+            <div style="animation:nvIn .4s ease both">
+              <h2 style="font:500 {{ h2Size }}px/1.2 'Source Serif 4',Georgia,serif;letter-spacing:-.012em;margin:0">Demand you didn't have to go out and find.</h2>
+              <p style="font:400 16.5px/1.75 'Familjen Grotesk',sans-serif;color:#585A50;margin:14px 0 0;text-wrap:pretty">Buyers come to Novel looking for parts. When one of them wants something you don't hold, Novel looks inside your own supplier network for someone who makes it, agrees what you pay, and sets what they pay. You never promise the buyer anything until the supplier has committed to you.</p>
+              <div style="display:flex;flex-wrap:wrap;gap:24px 40px;margin-top:24px">
+                <sc-for list="{{ mSteps }}" as="s" hint-placeholder-count="3">
+                  <div style="flex:1 1 200px;min-width:190px">
+                    <div style="font:400 10.5px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:#8D8F82">{{ s.n }}</div>
+                    <div style="font:600 16px 'Familjen Grotesk',sans-serif;margin-top:8px">{{ s.title }}</div>
+                    <div style="font:400 13.5px/1.65 'Familjen Grotesk',sans-serif;color:#585A50;margin-top:5px;text-wrap:pretty">{{ s.body }}</div>
+                  </div>
+                </sc-for>
+              </div>
+              <button onClick="{{ hideGuide }}" style="font:500 13.5px 'Familjen Grotesk',sans-serif;background:transparent;border:1px solid #E4E2D9;border-radius:8px;padding:10px 18px;cursor:pointer;margin-top:24px">Got it — don't show this again</button>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ mSpread }}" hint-placeholder-val="{{ true }}">
+            <div style="animation:nvIn .35s ease both">
+              <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px">
+                <h2 style="font:500 {{ h2Size }}px/1.2 'Source Serif 4',Georgia,serif;letter-spacing:-.012em;margin:0">Marketplace</h2>
+                <span style="flex:1"></span>
+                <button onClick="{{ showGuide }}" style="font:500 13px 'Familjen Grotesk',sans-serif;background:transparent;border:none;color:#6E7065;cursor:pointer;padding:0">What is this page?</button>
+              </div>
+              <div style="font:400 15px/1.75 'Familjen Grotesk',sans-serif;color:#585A50;margin-top:8px;text-wrap:pretty">{{ spread.note }}</div>
+              <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:22px 44px;margin-top:20px">
+                <sc-for list="{{ spread.figures }}" as="g" hint-placeholder-count="3">
+                  <div>
+                    <div style="font:400 10.5px 'IBM Plex Mono',monospace;letter-spacing:.14em;color:#8D8F82">{{ g.k }}</div>
+                    <div style="font:500 {{ figSize }}px/1.1 'Source Serif 4',Georgia,serif;margin-top:8px;color:{{ g.fg }}">{{ g.v }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+
+          <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin-top:34px;padding-top:24px;border-top:1px solid #E4E2D9">
+            <span style="font:400 11px 'IBM Plex Mono',monospace;letter-spacing:.16em;color:#8D8F82">A LIVE REQUEST</span>
+            <span style="flex:1"></span>
+            <span style="font:400 12.5px 'Familjen Grotesk',sans-serif;color:#8D8F82">Show me when</span>
+            <div style="display:flex;gap:14px">
+              <sc-for list="{{ matchOpts }}" as="o" hint-placeholder-count="2">
+                <button onClick="{{ o.go }}" style="font:500 12.5px 'Familjen Grotesk',sans-serif;background:transparent;border:none;padding:0;cursor:pointer;position:relative;color:{{ o.fg }}">
+                  {{ o.label }}
+                  <span style="position:absolute;left:0;right:0;bottom:-4px;height:1.5px;background:{{ o.underline }}"></span>
+                </button>
+              </sc-for>
+            </div>
+          </div>
+          <h3 style="font:500 {{ h3Size }}px/1.3 'Source Serif 4',Georgia,serif;letter-spacing:-.008em;margin:16px 0 0">{{ demand.title }}</h3>
+          <p style="font:400 16px/1.75 'Familjen Grotesk',sans-serif;color:#585A50;margin:12px 0 0;text-wrap:pretty">{{ demand.sub }}</p>
+          <div style="display:flex;flex-wrap:wrap;gap:22px 40px;margin-top:20px">
+            <sc-for list="{{ demand.tiles }}" as="t" hint-placeholder-count="4">
+              <div>
+                <div style="font:400 10.5px 'IBM Plex Mono',monospace;letter-spacing:.13em;color:#8D8F82">{{ t.k }}</div>
+                <div style="font:500 15.5px 'Familjen Grotesk',sans-serif;margin-top:5px">{{ t.v }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;margin-top:30px;padding-top:24px;border-top:1px solid #E4E2D9">
+            <span style="display:flex;align-items:center;gap:10px">
+              <sc-for list="{{ mDots }}" as="d" hint-placeholder-count="3">
+                <span title="{{ d.name }}" style="width:9px;height:9px;border-radius:50%;background:{{ d.bg }};animation:{{ d.anim }};animation-delay:{{ d.delay }}"></span>
+              </sc-for>
+            </span>
+            <span style="font:400 14.5px 'Familjen Grotesk',sans-serif;color:#585A50">{{ mLabel }}</span>
+            <span style="flex:1"></span>
+            <button onClick="{{ mPlay }}" style="font:500 13px 'Familjen Grotesk',sans-serif;background:transparent;border:1px solid #E4E2D9;border-radius:7px;padding:7px 14px;cursor:pointer">{{ mPlayLabel }}</button>
+          </div>
+
+          <sc-for list="{{ clusters }}" as="c" hint-placeholder-count="3">
+            <div style="margin-top:30px;padding-top:24px;border-top:1px solid #E4E2D9;transition:opacity .45s;opacity:{{ c.op }}">
+              <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px">
+                <span style="font:600 17px 'Familjen Grotesk',sans-serif">{{ c.name }}</span>
+                <span style="flex:1"></span>
+                <span style="font:500 12.5px 'Familjen Grotesk',sans-serif;color:{{ c.statusFg }}">{{ c.status }}</span>
+              </div>
+              <div style="font:400 15px/1.75 'Familjen Grotesk',sans-serif;color:#585A50;margin-top:9px;text-wrap:pretty">{{ c.blurb }}</div>
+              <div style="margin-top:12px">
+                <sc-for list="{{ c.rows }}" as="r" hint-placeholder-count="4">
+                  <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 16px;padding:12px 0;border-bottom:1px solid #EDEAE1;transition:opacity .35s;opacity:{{ r.op }}">
+                    <span style="flex:1 1 240px;min-width:200px">
+                      <span style="display:block;font:400 15px 'Familjen Grotesk',sans-serif;color:{{ r.fg }}">{{ r.a }}</span>
+                      <span style="display:block;font:400 12.5px/1.55 'Familjen Grotesk',sans-serif;color:#8D8F82;margin-top:3px">{{ r.b }}</span>
+                    </span>
+                    <span style="flex:none;margin-left:auto;font:400 14px 'IBM Plex Mono',monospace;color:{{ r.cFg }}">{{ r.c }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+
+          <sc-if value="{{ mCert }}" hint-placeholder-val="{{ true }}">
+            <div style="margin-top:30px;padding-top:24px;border-top:1px solid #E4E2D9;animation:nvIn .5s ease both">
+              <div style="font:400 11px 'IBM Plex Mono',monospace;letter-spacing:.16em;color:#8D8F82">WHAT THE BUYER RECEIVES</div>
+              <h3 style="font:500 {{ h3Size }}px/1.3 'Source Serif 4',Georgia,serif;letter-spacing:-.008em;margin:12px 0 0">1,200 motors at ₹13,400, delivered 11 September.</h3>
+              <p style="font:400 16px/1.75 'Familjen Grotesk',sans-serif;color:#585A50;margin:11px 0 0;text-wrap:pretty">One promise. Behind it: a commitment from Kirloskar Drives at ₹10,850, a booked production slot, and freight held on the Pune lane — all in place before this certificate existed.</p>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ showData }}" hint-placeholder-val="{{ true }}">
+      <div style="flex:1;overflow:auto">
+        <div style="max-width:{{ colMax }}px;margin:0 auto;padding:{{ padY }}px {{ padX }}px 64px">
+          <h2 style="font:500 {{ h2Size }}px/1.2 'Source Serif 4',Georgia,serif;letter-spacing:-.012em;margin:0">Where the answers come from</h2>
+          <p style="font:400 16px/1.75 'Familjen Grotesk',sans-serif;color:#585A50;margin:11px 0 0">Six sources, one per check. Each carries a date. Novel will not promise anything on evidence it cannot date.</p>
+          <div style="margin-top:24px">
+            <sc-for list="{{ dataRows }}" as="d" hint-placeholder-count="6">
+              <button onClick="{{ d.pick }}" style="display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 16px;width:100%;text-align:left;border:none;border-bottom:1px solid #EDEAE1;background:transparent;padding:16px 0 17px;cursor:pointer">
+                <span style="flex:none;min-width:104px;font:600 15px 'Familjen Grotesk',sans-serif;color:{{ d.nameFg }}">{{ d.name }}</span>
+                <span style="flex:1 1 240px;min-width:200px;font:400 14.5px/1.6 'Familjen Grotesk',sans-serif;color:#585A50">{{ d.reads }}</span>
+                <span style="flex:none;margin-left:auto;font:400 13px 'IBM Plex Mono',monospace;color:{{ d.freshFg }}">{{ d.fresh }}</span>
+              </button>
+            </sc-for>
+          </div>
+          <div style="margin-top:28px;padding-top:24px;border-top:1px solid #E4E2D9">
+            <div style="font:400 11px 'IBM Plex Mono',monospace;letter-spacing:.16em;color:#8D8F82">{{ dataSel.head }}</div>
+            <h3 style="font:500 {{ h3Size }}px/1.32 'Source Serif 4',Georgia,serif;letter-spacing:-.008em;margin:11px 0 0">{{ dataSel.headline }}</h3>
+            <p style="font:400 15px/1.75 'Familjen Grotesk',sans-serif;color:#585A50;margin:9px 0 0;text-wrap:pretty">{{ dataSel.body }}</p>
+            <button style="font:500 14px 'Familjen Grotesk',sans-serif;color:#fff;background:#1F5B4B;border:none;border-radius:8px;padding:12px 20px;cursor:pointer;margin-top:20px">{{ dataSel.action }}</button>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ showProfile }}" hint-placeholder-val="{{ true }}">
+      <div style="flex:1;overflow:auto">
+        <div style="max-width:{{ colMax }}px;margin:0 auto;padding:{{ padY }}px {{ padX }}px 64px">
+          <button onClick="{{ backFromProfile }}" style="font:500 13px 'Familjen Grotesk',sans-serif;background:transparent;border:none;color:#6E7065;cursor:pointer;padding:0;margin-bottom:22px">← Back to {{ backLabel }}</button>
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:16px">
+            <span style="width:56px;height:56px;border-radius:50%;background:#1F5B4B;color:#fff;font:500 19px 'Familjen Grotesk',sans-serif;display:flex;align-items:center;justify-content:center">RK</span>
+            <div>
+              <h2 style="font:500 {{ h3Size }}px 'Source Serif 4',Georgia,serif;letter-spacing:-.008em;margin:0">Rhea Kulkarni</h2>
+              <div style="font:400 15px 'Familjen Grotesk',sans-serif;color:#585A50;margin-top:5px">VP Commercial · Ardent Motors Private Limited</div>
+            </div>
+          </div>
+
+          <div style="margin-top:32px;padding-top:24px;border-top:1px solid #E4E2D9">
+            <div style="font:400 11px 'IBM Plex Mono',monospace;letter-spacing:.16em;color:#8D8F82">THE COMPANY</div>
+            <div style="display:flex;flex-wrap:wrap;gap:22px 44px;margin-top:18px">
+              <sc-for list="{{ company }}" as="c" hint-placeholder-count="8">
+                <div style="min-width:160px">
+                  <div style="font:400 10.5px 'IBM Plex Mono',monospace;letter-spacing:.13em;color:#8D8F82">{{ c.k }}</div>
+                  <div style="font:500 15px/1.5 'Familjen Grotesk',sans-serif;margin-top:5px">{{ c.v }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="margin-top:32px;padding-top:24px;border-top:1px solid #E4E2D9">
+            <div style="font:400 11px 'IBM Plex Mono',monospace;letter-spacing:.16em;color:#8D8F82">THE RULES NOVEL ENFORCES</div>
+            <div style="margin-top:12px">
+              <sc-for list="{{ policies }}" as="p" hint-placeholder-count="5">
+                <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 16px;padding:14px 0;border-bottom:1px solid #EDEAE1">
+                  <span style="flex:1 1 240px;min-width:200px">
+                    <span style="display:block;font:400 15px 'Familjen Grotesk',sans-serif">{{ p.name }}</span>
+                    <span style="display:block;font:400 12.5px/1.6 'Familjen Grotesk',sans-serif;color:#8D8F82;margin-top:3px">{{ p.note }}</span>
+                  </span>
+                  <span style="flex:none;margin-left:auto;font:500 16px 'Source Serif 4',Georgia,serif">{{ p.value }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="font:400 13px/1.65 'Familjen Grotesk',sans-serif;color:#8D8F82;margin-top:12px">Only your finance director can change these. Novel refuses to issue a certificate that breaks any of them, including on your own instruction.</div>
+          </div>
+
+          <div style="margin-top:32px;padding-top:24px;border-top:1px solid #E4E2D9">
+            <div style="font:400 11px 'IBM Plex Mono',monospace;letter-spacing:.16em;color:#8D8F82">WHO ELSE HAS ACCESS</div>
+            <div style="margin-top:12px">
+              <sc-for list="{{ team }}" as="t" hint-placeholder-count="4">
+                <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 16px;padding:13px 0;border-bottom:1px solid #EDEAE1">
+                  <span style="flex:none;min-width:150px;font:400 15px 'Familjen Grotesk',sans-serif">{{ t.name }}</span>
+                  <span style="flex:1 1 180px;font:400 14px 'Familjen Grotesk',sans-serif;color:#8D8F82">{{ t.role }}</span>
+                  <span style="flex:none;margin-left:auto;font:400 13.5px 'Familjen Grotesk',sans-serif;color:#585A50">{{ t.can }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1512,&quot;height&quot;:900}}">
+const INK='#191A17', SUB='#585A50', MUTE='#8D8F82', LINE='#E4E2D9', GREEN='#1F5B4B';
+const OK='#1F6B52', WARN='#A26A16', BAD='#96352C';
+const GW = 900, GH = 540;
+const DUR = [0,800,1000,1500,1000,1200,1300,1200,0];
+
+const MODS = [
+  {id:'sales',name:'Sales',x:360,y:0,start:2,done:3,kind:'bad',
+   pending:'Waiting',active:'Reading the request',
+   done_:'\u20B914,500 leaves 16.1% margin. The floor is 19.4%.',
+   status:'Asks for \u20B915,500',
+   why:'The margin floor for this customer tier is 19.4%, signed by Finance in the August policy. At \u20B914,500 this order returns 16.1%. \u20B915,500 is the lowest price that clears the floor and still sits inside what Sundara has accepted on their last fourteen orders.',
+   evidence:'Price list of 1 August \u00B7 margin policy signed by Finance'},
+  {id:'finance',name:'Finance',x:0,y:160,start:3,done:4,kind:'bad',
+   pending:'Waiting',active:'Checking credit',
+   done_:'Net-30 on \u20B958.0L is over their \u20B918.0L limit.',
+   status:'Needs 70% up front',
+   why:'Sundara\u2019s open credit limit is \u20B918.0L. On Net-30 the entire \u20B958.0L would sit unsecured until October. Taking 70% before dispatch brings exposure down to \u20B918.6L, which clears as soon as the first delivery invoices.',
+   evidence:'Credit limits, 2 hours old \u00B7 payment history since 2019'},
+  {id:'inventory',name:'Inventory',x:240,y:160,start:3,done:4,kind:'warn',
+   pending:'Waiting',active:'Counting stock',
+   done_:'327 of 400 are on the floor, and now held.',
+   status:'73 short',
+   why:'The stock count is four minutes old, fresh enough for Novel to place a real hold rather than simply read a number. 327 units are reserved against this order and nothing else can consume them. The hold lapses at 18:14 if no certificate is issued.',
+   evidence:'Stock count, 4 minutes old \u00B7 hold expires 18:14 today'},
+  {id:'procurement',name:'Procurement',x:480,y:160,start:3,done:4,kind:'ok',
+   pending:'Waiting',active:'Looking for the shortfall',
+   done_:'Line 2 has a free slot on 8 September.',
+   status:'Slot reserved',
+   why:'No supplier in the network can deliver 73 motors before 5 September. Line 2 has an unused build slot on 8 September, which is why the answer splits the delivery instead of moving the whole order later.',
+   evidence:'Line capacity, 3 days old \u00B7 slot BLD-2214'},
+  {id:'logistics',name:'Logistics',x:720,y:160,start:3,done:5,kind:'warn',
+   pending:'Waiting',active:'No weight on file',
+   done_:'Two lorries booked, 5 and 10 September.',
+   status:'Weight confirmed',
+   why:'Freight class depends on the weight of one motor, and no source on file carries one for MTR-2K2-B. Novel stopped rather than guess. Once 41.5 kg was confirmed by name, two lorries were booked on the Pune lane.',
+   evidence:'Weight confirmed by R. Kulkarni at 14:26 \u00B7 lane rates, 26 minutes old'},
+  {id:'risk',name:'Risk',x:360,y:320,start:5,done:6,kind:'warn',
+   pending:'Waiting for the other five',active:'Checking the chain',
+   done_:'The order can be promised on the revised terms.',
+   status:'Cleared',
+   why:'Risk reads the other five answers and nothing else \u2014 it never looks at the customer or the request directly. The weakest evidence in this chain is a weight confirmed by hand, which policy accepts for orders under \u20B975L.',
+   evidence:'Reads five answers \u00B7 policy pack confirmed 9 days ago'}
+];
+
+const COORD = {name:'Coordinator', x:360, y:440,
+  why:'Six deterministic checks, run in a fixed order, with no judgement involved. Five pass. The margin check fails at the price asked, which is why this comes back as a counteroffer rather than a straight yes.',
+  evidence:'Six checks \u00B7 one failed \u00B7 certificate NVC-8841-A'};
+
+const PIPES = [
+  ['M450,86 C450,126 90,120 90,160',3],['M450,86 C450,126 330,120 330,160',3],
+  ['M450,86 C450,126 570,120 570,160',3],['M450,86 C450,126 810,120 810,160',3],
+  ['M90,246 C90,292 400,282 400,320',5],['M330,246 C330,288 435,288 435,320',5],
+  ['M570,246 C570,288 465,288 465,320',5],['M810,246 C810,292 500,282 500,320',5],
+  ['M450,406 C450,422 450,424 450,440',6]
+];
+
+const DATA = [
+  {id:'sales',name:'Sales',reads:'Price lists, discount authority, margin floors',fresh:'12 min ago',ok:2,
+   headline:'Prices and margin floors are current.',body:'Synced from your price book twelve minutes ago. Margin floors are the signed policy version, not a copy.',action:'Re-sync now'},
+  {id:'finance',name:'Finance',reads:'Credit limits, exposure, payment history',fresh:'2 hours ago',ok:1,
+   headline:'Credit data is a two-hour-old snapshot.',body:'Good enough to judge headroom, but a payment received this morning may not appear yet. Novel says so on every answer that uses it.',action:'Upload a newer file'},
+  {id:'inventory',name:'Inventory',reads:'On-hand, allocated and in-transit by item',fresh:'4 min ago',ok:3,
+   headline:'Stock is live, and Novel can place real holds.',body:'This is the strongest kind of evidence: a number Novel can reserve against, not just read.',action:'View current holds'},
+  {id:'procurement',name:'Procurement',reads:'Line capacity, build slots, supplier lead times',fresh:'3 days ago',ok:0,
+   headline:'This source is three days old.',body:'Build slots move daily. Answers that depend on it are still given, but flagged \u2014 and this is the weakest source in your setup right now.',action:'Upload this week\u2019s capacity'},
+  {id:'logistics',name:'Logistics',reads:'Lane capacity, freight class, unit weights',fresh:'26 min ago',ok:2,
+   headline:'Lane rates are current, but one field is missing.',body:'The file has no unit weight column. That is what held the Sundara order until you confirmed 41.5 kg by hand.',action:'Add the missing column'},
+  {id:'risk',name:'Risk',reads:'Policy documents, penalty clauses, exposure rules',fresh:'9 days ago',ok:1,
+   headline:'Policies were last confirmed nine days ago.',body:'Signed off by a named person rather than pulled from a system. Acceptable for orders under \u20B975L.',action:'Re-confirm policies'}
+];
+
+const MDUR = [0,800,1200,1100,1400,1200,1300,0];
+
+class Component extends DCLogic {
+  state = {screen:'workspace', prev:'workspace', stage:0, playing:false,
+    attested:false, dsel:'procurement', view:'diagram', hover:null, sel:'live',
+    qOpen:false, checksOpen:true, recordOpen:false, railOpen:false, sent:false,
+    guideSeen:false, followUp:false, gw:GW, vw:1400,
+    mstage:0, mplaying:false, noMatch:false};
+
+  componentDidMount(){
+    this.onResize = ()=>{ const w = window.innerWidth; if(w !== this.state.vw) this.setState({vw:w}); };
+    window.addEventListener('resize', this.onResize);
+    this.onResize();
+    this.ro = new ResizeObserver(es=>{
+      const w = Math.round(es[0].contentRect.width);
+      if(w > 0 && w !== this.state.gw) this.setState({gw:w});
+    });
+    if(this.el) this.ro.observe(this.el);
+  }
+  componentWillUnmount(){
+    clearTimeout(this.t); clearTimeout(this.mt);
+    if(this.ro) this.ro.disconnect();
+    window.removeEventListener('resize', this.onResize);
+  }
+  setEl = (el)=>{
+    if(this.el === el) return;
+    if(this.el && this.ro) this.ro.unobserve(this.el);
+    this.el = el;
+    if(el && this.ro) this.ro.observe(el);
+    if(el){ const w = Math.round(el.getBoundingClientRect().width); if(w>0 && w!==this.state.gw) this.setState({gw:w}); }
+  };
+
+  gate(){ return !this.state.attested ? 4 : 8; }
+  tick(){
+    clearTimeout(this.t);
+    const s = this.state.stage;
+    if(s>=8 || s>=this.gate()){ if(this.state.playing) this.setState({playing:false}); return; }
+    if(!this.state.playing) return;
+    this.t = setTimeout(()=>{ this.setState(p=>({stage:Math.min(8,p.stage+1)}), ()=>this.tick()); }, DUR[s+1]);
+  }
+  mtick(){
+    clearTimeout(this.mt);
+    const s = this.state.mstage;
+    if(s>=7){ if(this.state.mplaying) this.setState({mplaying:false}); return; }
+    if(!this.state.mplaying) return;
+    this.mt = setTimeout(()=>{ this.setState(p=>({mstage:Math.min(7,p.mstage+1)}), ()=>this.mtick()); }, MDUR[s+1]);
+  }
+  nav(k){ this.setState(p=>({screen:k, prev: p.screen==='profile' ? p.prev : p.screen, railOpen:false})); }
+
+  renderVals(){
+    const st = this.state, S = st.stage, M = st.mstage;
+    const screen = st.screen;
+    const settled = S >= 8;
+    const blocked = S === 4 && !st.attested;
+    const running = S > 0 && !settled;
+    const mob = st.vw < 780;
+    const wide = st.vw >= 1080;
+    const kindFg = {ok:OK, warn:WARN, bad:BAD, idle:MUTE, live:INK};
+    const kindDot = {ok:OK, warn:WARN, bad:BAD, idle:'#D8D5C9', live:INK};
+
+    const scale = mob ? 1 : Math.max(.55, Math.min(1, st.gw / GW));
+    const graphLeft = Math.max(0, Math.round((st.gw - GW * scale) / 2));
+
+    const navItems = [['workspace','Desk'],['market','Marketplace'],['data','Sources']].map(([k,label])=>({
+      label: (k==='workspace' && !mob) ? 'Commitment desk' : label,
+      fg: screen===k ? INK : '#6E7065', underline: screen===k ? INK : 'transparent',
+      go: ()=>this.nav(k)}));
+
+    const CASES = [
+      {id:'live',customer:'Sundara Engineering',line:'400 motors to Pune · ₹62.0L',
+        state: S===0 ? 'Not started' : (blocked ? 'Waiting on you' : (st.sent ? 'Sent to the customer' : (settled?'Answer ready':'Checking now'))),
+        fg: S===0 ? MUTE : (blocked?WARN:INK)},
+      {id:'arcline',customer:'Arcline Pumps',line:'120 motors to Surat · ₹14.9L',state:'Committed',fg:OK,
+        detail:'Promised at the asked price with no changes. All six checks passed first time, and the stock was already on the floor.'},
+      {id:'kestrel',customer:'Kestrel Mobility',line:'2,000 motors to Chennai · ₹68.0L',state:'Could not commit',fg:BAD,
+        detail:'No supplier in the network could build 2,000 units inside eight weeks, and the price asked was below the floor even at full volume. Novel declined rather than promise a date it could not hold.'},
+      {id:'bhavnagar',customer:'Bhavnagar Traders',line:'60 motors to Rajkot · ₹11.4L',state:'Repaired after a delay',fg:WARN,
+        detail:'A lorry was cancelled two days before dispatch. Novel re-booked freight, issued a replacement certificate, and the original stayed on file as history.'},
+      {id:'orbit',customer:'Orbit Electricals',line:'900 motors to Nashik · ₹39.6L',state:'Sent for approval',fg:MUTE,
+        detail:'The terms clear every check but the value sits above your attestation limit, so Priya Menon has to approve it before the certificate is issued.'}
+    ];
+    const sel = st.sel || 'live';
+    const cases = CASES.map(c=>({...c, stateFg:c.fg,
+      bg: c.id===sel ? '#F0EEE6' : 'transparent',
+      go: ()=>this.setState({sel:c.id, railOpen:false})}));
+    const archCase = CASES.find(c=>c.id===sel && c.id!=='live');
+
+    const dots = MODS.map((m,i)=>{
+      const on = S >= m.start, fin = S >= m.done;
+      const isBlocked = blocked && m.id==='logistics';
+      const active = on && !fin && !isBlocked;
+      return {name:m.name,
+        bg: isBlocked ? WARN : (fin ? kindDot[m.kind] : (on ? INK : '#D8D5C9')),
+        anim: active ? 'nvDot 1.05s ease-in-out infinite' : 'none',
+        delay: (i * 0.12) + 's'};
+    });
+    const doneCount = MODS.filter(m=>S>=m.done).length;
+    const dotsLabel = blocked ? 'Held — Logistics needs a weight'
+      : (S===1 ? 'Reading the request'
+      : (settled ? 'All six answered · one term had to change'
+      : (running ? (doneCount>0 ? doneCount+' of six answered' : 'Checking price, credit, stock, supply, freight and risk') : '')));
+
+    const modules = MODS.map(m=>{
+      const on = S >= m.start, fin = S >= m.done;
+      const active = on && !fin;
+      const isBlocked = blocked && m.id==='logistics';
+      const kind = fin ? m.kind : (isBlocked ? 'warn' : (active ? 'live' : 'idle'));
+      return {name:m.name,
+        status: fin ? m.status : (isBlocked ? 'Needs a weight' : (active ? 'Checking' : 'Waiting')),
+        statusFg: kindFg[kind],
+        line: fin ? m.done_ : (active ? m.active : m.pending),
+        why:m.why, showWhy: fin, op: on ? 1 : .38};
+    });
+
+    const mkNode = (m, on, kind, status) => {
+      const hovered = st.hover === m.name;
+      return {name:m.name, x:m.x, y:m.y, status, statusFg: kindFg[kind], dot: kindDot[kind],
+        border: hovered ? INK : LINE,
+        shadow: hovered ? '0 10px 26px rgba(25,26,23,.12)' : 'none',
+        op: on ? 1 : .38,
+        enter: ()=>this.setState({hover:m.name}), leave: ()=>this.setState({hover:null})};
+    };
+    const nodes = MODS.map(m=>{
+      const on = S >= m.start, fin = S >= m.done;
+      const active = on && !fin;
+      const isBlocked = blocked && m.id==='logistics';
+      const kind = fin ? m.kind : (isBlocked ? 'warn' : (active ? 'live' : 'idle'));
+      return mkNode(m, on, kind, fin ? m.status : (isBlocked ? 'Needs a weight' : (active ? 'Checking' : 'Waiting')));
+    }).concat([mkNode(COORD, S>=6, S>=7 ? 'warn' : (S>=6 ? 'live' : 'idle'),
+      S>=7 ? '6 checks, 1 failed' : (S>=6 ? 'Verifying' : 'Waiting'))]);
+
+    const hoverSrc = st.hover ? (MODS.find(m=>m.name===st.hover) || (COORD.name===st.hover ? COORD : null)) : null;
+    const tip = hoverSrc ? {on:true, name:'WHY '+hoverSrc.name.toUpperCase()+' SAID THIS',
+      why: hoverSrc.why, evidence: hoverSrc.evidence,
+      x: Math.max(0, Math.min(hoverSrc.x - 75, GW - 330)),
+      y: hoverSrc.y + 100} : {on:false, name:'', why:'', evidence:'', x:0, y:0};
+
+    const pipes = PIPES.map(p=>{
+      const on = S >= p[1];
+      const isRunning = S === p[1] && !blocked;
+      return {d:p[0], stroke: on ? '#B6B4A6' : '#EDEAE1',
+        dash: isRunning ? '4 5' : (on ? '0' : '3 5'),
+        anim: isRunning ? 'nvDash .8s linear infinite' : 'none'};
+    });
+
+    const noMatch = st.noMatch;
+    const row = (a,b,c,shown,cFg)=>({a,b,c, op: shown?1:.3,
+      fg: shown?INK:MUTE, cFg: shown ? (cFg||INK) : '#CBC8BB'});
+    const checkRows = noMatch ? [
+      row('Nobody in our network makes this','searched 1,284 suppliers on record','none', M>=3, BAD),
+      row('Closest match makes a smaller motor','Kirloskar Drives, 1.5 kW only','42% fit', M>=3, WARN),
+      row('Third request for this motor this month','logged as a sourcing signal','SIG-118', M>=3)
+    ] : [
+      row('Kirloskar Drives, Pune','1,800 a month free, confirmed two days ago','94% fit', M>=3, OK),
+      row('Shakti Electricals, Nashik','900 a month free, confirmed six days ago','81% fit', M>=3),
+      row('Vertex Motion, Coimbatore','capacity last confirmed 21 days ago','67% fit', M>=3, WARN),
+      row('Anode Systems, Noida','no line for this motor type','12% fit', M>=3, MUTE)
+    ];
+    const negRows = noMatch ? [
+      row('Nothing to negotiate','no supplier cleared the fit threshold','', M>=5)
+    ] : [
+      row('Kirloskar opened at \u20B911,400','for 1,200 units','\u20B911,400', M>=5),
+      row('Settled at \u20B910,850 after three rounds','volume break at 1,000 units','\u20B910,850', M>=5, OK),
+      row('Our walk-away price, fixed by category','never crossed, even if we lose the deal','\u20B911,600', M>=5, BAD),
+      row('What this buyer has paid before','last four accepted quotes, same motor','\u20B913,200\u2013\u20B913,900', M>=5),
+      row('We sell at \u20B913,400','19.0% margin, above the 17.5% floor','\u20B913,400', M>=5, OK)
+    ];
+    const comRows = noMatch ? [
+      row('Declined, with reasons','buyer sent two motors we can actually supply','sent', M>=7),
+      row('Opened a sourcing brief','for procurement to review','SRC-44', M>=7)
+    ] : [
+      row('Kirloskar committed first','hold KD-7712 on 1,200 units','held', M>=6, OK),
+      row('Production slot reserved','dispatch 8 September','held', M>=6, OK),
+      row('Freight held on the Pune lane','two loads, arriving 11 September','held', M>=6, OK),
+      row('Only then, a promise to the buyer','the certificate is the last thing created','issued', M>=7, GREEN)
+    ];
+    const clusters = [
+      {name:'1 · Find who can make it', start:2, done:3, rows:checkRows,
+       blurb:'Novel searches your own supplier network. Who makes this, what can they actually run this month, and how recently did they confirm it.'},
+      {name:'2 · Agree a price, set ours', start:4, done:5, rows:negRows,
+       blurb:'Novel buys as low as your walk-away allows, then prices to the buyer on cost, what they have paid before, and what the market is doing.'},
+      {name:'3 · Commit, then promise', start:6, done:7, rows:comRows,
+       blurb:'The supplier commits to us first. Only after that does the buyer get a certificate.'}
+    ].map(c=>{
+      const on = M >= c.start, fin = M >= c.done;
+      const focused = on && !fin;
+      return {...c, status: fin ? 'Done' : (focused ? 'Working' : 'Waiting'),
+        statusFg: fin ? OK : (focused ? INK : MUTE), op: on ? 1 : .42};
+    });
+    const mDots = [[2,'Finding a maker'],[4,'Agreeing prices'],[6,'Committing, then promising']].map((d,i)=>{
+      const start = d[0], fin = M >= start+1, on = M >= start;
+      return {name:d[1], bg: fin ? OK : (on ? INK : '#D8D5C9'),
+        anim: (on && !fin) ? 'nvDot 1.05s ease-in-out infinite' : 'none', delay: (i*0.14)+'s'};
+    });
+    const mNames = noMatch
+      ? ['Waiting for a request','Request accepted','Searching your network','Nobody makes this','Nothing to negotiate','No price possible','Deciding what to tell them','Declined, and logged']
+      : ['Waiting for a request','Request accepted','Searching your network','Four suppliers found','Negotiating','Price agreed','Supplier committing','Promise sent to buyer'];
+
+    const dash = '\u2014';
+    let spread;
+    if(noMatch){
+      spread = {note: M>=3
+          ? 'No supplier in your network makes this motor, so there is no price to agree and nothing has been promised.'
+          : 'One request open. Novel is looking for someone who can make it.',
+        figures:[{k:'THEY PAY',v:dash,fg:MUTE},{k:'WE PAY',v:dash,fg:MUTE},{k:'YOUR MARGIN',v:'none',fg:MUTE}]};
+    } else if(M>=5){
+      spread = {note: M>=7
+          ? 'Agreed and promised. The buyer has a dated certificate and the supplier is committed to us.'
+          : 'Both prices agreed. Nothing is promised to the buyer until the supplier commits.',
+        figures:[{k:'THEY PAY',v:'\u20B913,400',fg:INK},{k:'WE PAY',v:'\u20B910,850',fg:INK},{k:'YOUR MARGIN',v:'19.0%',fg: M>=7 ? OK : INK}]};
+    } else if(M>=1){
+      spread = {note:'One request open. No price is agreed yet \u2014 Novel is still working through the network.',
+        figures:[{k:'THEY PAY',v:dash,fg:MUTE},{k:'WE PAY',v:dash,fg:MUTE},{k:'YOUR MARGIN',v:'not agreed',fg:MUTE}]};
+    } else {
+      spread = {note:'Nothing running. Requests from buyers land here and Novel works them one at a time.',
+        figures:[{k:'THEY PAY',v:dash,fg:MUTE},{k:'WE PAY',v:dash,fg:MUTE},{k:'YOUR MARGIN',v:dash,fg:MUTE}]};
+    }
+
+    const dataRows = DATA.map(d=>({name:d.name, reads:d.reads, fresh:d.fresh,
+      pick: ()=>this.setState({dsel:d.id}),
+      nameFg: d.id===st.dsel ? INK : SUB,
+      freshFg: d.ok===0 ? WARN : MUTE}));
+    const dsel = DATA.find(d=>d.id===st.dsel) || DATA[0];
+
+    const timeline = [
+      ['14:22','Order received','400 motors, \u20B914,500 each, wanted by 5 September',INK],
+      ['14:22','Sales flagged the price','16.1% margin against a 19.4% floor',BAD],
+      ['14:22','Four checks started together','finance, inventory, procurement, logistics','#B6B4A6'],
+      ['14:22','327 motors put on hold','held until 18:14 today',OK],
+      ['14:22','Finance rejected Net-30','\u20B958.0L against an \u20B918.0L limit',BAD],
+      ['14:22','Production slot reserved','8 September, covers the missing 73',OK],
+      ['14:22','Logistics stopped the run','no weight on file for this motor',WARN],
+      ['14:26','You confirmed 41.5 kg','recorded in your name',WARN],
+      ['14:26','Two lorries booked','5 September and 10 September',OK],
+      ['14:26','Risk cleared the order','on the revised terms',OK],
+      ['14:26','Certificate issued','valid until 19:40 today',OK]
+    ].map(e=>({t:e[0],title:e[1],detail:e[2],dot:e[3]}));
+
+    const backNames = {workspace:'the commitment desk', market:'the marketplace', data:'sources'};
+    const onDesk = screen === 'workspace';
+    const view = mob ? 'list' : st.view;
+
+    return {
+      // responsive
+      mob, wide, padX: mob ? 18 : 40, padY: mob ? 26 : 42,
+      colMax: mob ? 720 : 760, centreMin: mob ? 0 : 560,
+      headerH: mob ? 52 : 58, hGap: mob ? 14 : 22, navSize: mob ? 13 : 14,
+      h1Size: mob ? 30 : 41, h2Size: mob ? 25 : 34, h3Size: mob ? 21 : 27,
+      qSize: mob ? 17 : 20, figSize: mob ? 27 : 34,
+      railW: mob ? '84%' : '252px',
+      runPadBottom: mob ? 96 : 110,
+
+      navItems, cases, modules, nodes, pipes, tip, dots, dotsLabel,
+      dotsFg: blocked ? WARN : (settled ? INK : SUB),
+      graphRef: this.setEl, graphScale: scale, graphLeft, graphH: Math.round(GH * scale),
+      caseName: screen==='market' ? 'Vikram Traders · REQ-4471'
+        : (screen==='profile' ? '' : (archCase ? archCase.customer : 'Sundara Engineering · NV-2419')),
+      avatarBg: screen==='profile' ? GREEN : '#F0EEE6',
+      avatarFg: screen==='profile' ? '#fff' : SUB,
+      showCasesBtn: onDesk,
+      showRail: onDesk && st.railOpen,
+      railBtnLabel: st.railOpen ? 'Hide cases' : (mob ? 'Cases' : 'Show cases'),
+      railBtnFg: st.railOpen ? INK : '#6E7065',
+      toggleRail: ()=>this.setState(p=>({railOpen:!p.railOpen})),
+      draft:'400 motors for Sundara Engineering at \u20B914,500 each, Net-30, delivered to Pune by 5 September.',
+      showArchived: onDesk && !!archCase,
+      arch: archCase ? {customer:archCase.customer, line:archCase.line, state:archCase.state, detail:archCase.detail, dot:archCase.fg}
+        : {customer:'',line:'',state:'',detail:'',dot:MUTE},
+      backToLive: ()=>this.setState({sel:'live'}),
+      showNew: onDesk && (S>0 || !!archCase),
+      newLabel: mob ? 'New' : 'New request',
+      newRequest: ()=>{ clearTimeout(this.t); this.setState({sel:'live',stage:0,playing:false,attested:false,sent:false,railOpen:false,followUp:false}); },
+      showHome: onDesk && !archCase && S===0,
+      showRun: onDesk && !archCase && S>0,
+      showMarket: screen==='market',
+      showData: screen==='data',
+      showProfile: screen==='profile',
+      blocked, settled,
+      questionText: st.qOpen
+        ? 'Sundara Engineering want 400 motors, part number MTR-2K2-B, at \u20B914,500 each on Net-30 terms, delivered to their Pune plant by 5 September. Their buyer noted that a competitor has quoted \u20B914,200 and asked us to hold the price for two weeks.'
+        : 'Can we promise Sundara 400 motors at \u20B914,500, Net-30, in Pune by 5 September?',
+      questionToggle: st.qOpen ? 'Show less' : 'Show the full request',
+      questionOpen: st.qOpen,
+      toggleQuestion: ()=>this.setState(p=>({qOpen:!p.qOpen})),
+      questionMeta:[{k:'CUSTOMER',v:'Sundara Engineering'},{k:'CUSTOMER SINCE',v:'2019 · 14 orders'},
+        {k:'ORDER VALUE ASKED',v:'\u20B958.0L'},{k:'RECEIVED',v:'Today, 14:22'},{k:'RAISED BY',v:'A. Deshpande, Sales'}],
+      checksOpen: st.checksOpen,
+      checksToggle: st.checksOpen ? 'Hide' : 'Show',
+      toggleChecks: ()=>this.setState(p=>({checksOpen:!p.checksOpen})),
+      showViewToggle: st.checksOpen && !mob,
+      showDiagram: st.checksOpen && view==='diagram',
+      showList: st.checksOpen && view==='list',
+      recordOpen: st.recordOpen,
+      recordToggle: st.recordOpen ? 'Hide the timeline' : 'Show the timeline',
+      toggleRecord: ()=>this.setState(p=>({recordOpen:!p.recordOpen})),
+      viewOpts: [['diagram','Diagram'],['list','List']].map(([k,label])=>({
+        label, fg: st.view===k ? INK : MUTE, underline: st.view===k ? INK : 'transparent',
+        go: ()=>this.setState({view:k})})),
+      submit: ()=>this.setState({stage:1, playing:true, sent:false, followUp:false}, ()=>this.tick()),
+      reset: ()=>{ clearTimeout(this.t); this.setState({stage:0,playing:false,attested:false,sent:false,followUp:false}); },
+      attest: ()=>this.setState({attested:true, playing:true}, ()=>this.tick()),
+      closeNegotiation: ()=>this.setState({sent:true}),
+      openProfile: ()=>this.nav('profile'),
+      backFromProfile: ()=>this.setState(p=>({screen:p.prev || 'workspace'})),
+      backLabel: backNames[st.prev] || 'the commitment desk',
+
+      // follow-up, collapsed by default
+      followCollapsed: !st.followUp && !blocked,
+      followExpanded: st.followUp && !blocked,
+      openFollow: ()=>this.setState({followUp:true}),
+      closeFollow: ()=>this.setState({followUp:false}),
+      followLaunchLabel: st.sent ? 'Case closed' : 'Follow up',
+      followLaunchHint: st.sent ? '' : (settled ? 'ask about this answer' : 'opens when there is an answer'),
+      followDotBg: st.sent ? MUTE : (settled ? OK : '#D8D5C9'),
+      launchBottom: mob ? 16 : 22, launchRight: mob ? 16 : 24,
+      launchLeft: mob ? '16px' : 'auto', launchRadius: mob ? 12 : 999,
+      panelBottom: mob ? 0 : 22, panelRight: mob ? '0' : '24px',
+      panelLeft: mob ? '0' : 'auto',
+      panelW: mob ? '100%' : '380px',
+      panelMaxH: mob ? '72%' : '62%',
+      followBusy: running && !blocked,
+      followHeld: blocked,
+      followReady: settled && !st.sent,
+      followDone: st.sent,
+      followOpen: settled && !st.sent,
+      followState: st.sent ? 'Closed' : (settled ? 'Open' : 'Waiting'),
+      followStateFg: settled && !st.sent ? OK : MUTE,
+      suggestions:['Why could we not offer Net-30?','What if they pay 60% up front instead?','Who confirmed the motor weight?'],
+
+      mGuide: !st.guideSeen,
+      mSpread: st.guideSeen,
+      spread,
+      hideGuide: ()=>this.setState({guideSeen:true}),
+      showGuide: ()=>this.setState({guideSeen:false}),
+      mSteps:[
+        {n:'STEP ONE',title:'Find who can make it',body:'Novel searches your supplier network — capability, free capacity, and how recently it was confirmed.'},
+        {n:'STEP TWO',title:'Agree both prices',body:'It negotiates what you pay the supplier, then sets what the buyer pays, from cost and what they have paid before.'},
+        {n:'STEP THREE',title:'Commit, then promise',body:'The supplier commits to you first. Only after that does the buyer get a dated promise.'}
+      ],
+      matchOpts: [[false,'a supplier exists'],[true,'nobody makes it']].map(([v,label])=>({
+        label, fg: noMatch===v ? INK : MUTE,
+        underline: noMatch===v ? INK : 'transparent',
+        go: ()=>this.setState({noMatch:v})})),
+      clusters, mDots, mCert: M>=7 && !noMatch,
+      mLabel: mNames[M],
+      mPlayLabel: st.mplaying ? 'Pause' : (M>=7 ? 'Watch again' : (M===0 ? 'Start' : 'Continue')),
+      mPlay: ()=>{
+        if(this.state.mstage>=7){ this.setState({mstage:1,mplaying:true},()=>this.mtick()); return; }
+        this.setState(p=>({mplaying:!p.mplaying}), ()=>this.mtick());
+      },
+      demand:{title:'A buyer we have never sold to wants 1,200 motors in Pune by 12 September.',
+        sub:'Vikram Traders found us through the marketplace. We hold none of this motor in stock \u2014 but four suppliers in our network might.',
+        tiles:[{k:'QUANTITY',v:'1,200 motors'},{k:'THEIR TARGET',v:'\u20B913,900 each'},{k:'DESTINATION',v:'Pune'},{k:'WANTED BY',v:'12 September'}]},
+
+      dataRows, dataSel:{head: dsel.name.toUpperCase()+' \u00B7 UPDATED '+dsel.fresh.toUpperCase(),
+        headline: dsel.headline, body: dsel.body, action: dsel.action},
+
+      company:[
+        {k:'LEGAL NAME',v:'Ardent Motors Private Limited'},
+        {k:'WHAT WE MAKE',v:'Industrial BLDC and induction motors, 750 W to 5 kW'},
+        {k:'HEAD OFFICE',v:'Andheri East, Mumbai'},
+        {k:'PLANTS',v:'Bhiwandi (Line 1, Line 2) and Nashik'},
+        {k:'GST NUMBER',v:'27AAECA4471K1ZP'},
+        {k:'PEOPLE',v:'340 employees'},
+        {k:'ON NOVEL SINCE',v:'March 2026'},
+        {k:'CASES THIS MONTH',v:'118 · 94 committed'}
+      ],
+      policies:[
+        {name:'Margin floor',note:'Below this, Novel counters instead of accepting',value:'19.4%'},
+        {name:'Marketplace walk-away, BLDC 2\u20133 kW',note:'The most we will ever pay a supplier',value:'\u20B911,600'},
+        {name:'Attestation limit',note:'Above this value, a hand-confirmed number is not enough',value:'\u20B975.0L'},
+        {name:'Stock hold window',note:'How long stock stays reserved without a certificate',value:'4 hours'},
+        {name:'Staleness warning',note:'Answers are flagged when evidence is older than this',value:'48 hours'}
+      ],
+      team:[
+        {name:'Anil Deshpande',role:'Head of Sales',can:'Raises requests'},
+        {name:'Priya Menon',role:'Finance Director',can:'Changes the rules above'},
+        {name:'Sanjay Varma',role:'Plant Manager, Bhiwandi',can:'Confirms capacity'},
+        {name:'Rhea Kulkarni',role:'VP Commercial',can:'Issues certificates'}
+      ],
+
+      timeline,
+      changes:[
+        {field:'PRICE EACH',from:'\u20B914,500',to:'\u20B915,500'},
+        {field:'PAYMENT',from:'Net-30',to:'70% up front'},
+        {field:'DELIVERY',from:'All 400 by 5 Sept',to:'327 on 5 Sep, 73 on 10 Sep'}
+      ],
+      backing:[
+        {title:'327 motors held from stock',detail:'until 18:14 today'},
+        {title:'A production slot on Line 2',detail:'8 September · 73 motors'},
+        {title:'Two lorries booked to Pune',detail:'5 and 10 September'},
+        {title:'A weight you confirmed',detail:'41.5 kg · 14:26 today'},
+        {title:'\u20B943.4L due before the first delivery',detail:'70% of \u20B962.0L'}
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

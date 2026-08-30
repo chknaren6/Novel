@@ -3,8 +3,34 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getOpenAIClient } from "@/lib/openaiClient";
 import { OpenAIModelGateway } from "@/gateway/openaiGateway";
+import { createDeskDemoGateway } from "@/gateway/demoModelGateway";
+import type { ModelGateway } from "@/gateway/modelGateway";
 import { runB2BEvaluation } from "@/workflow/runB2BEvaluation";
 import { ToolError } from "@/lib/types";
+
+// DESK_MODEL_MODE is unset (or "live") by default: the real OpenAIModelGateway, built
+// straight from .env, exactly as before this existed. Setting DESK_MODEL_MODE=demo in
+// .env is an explicit, opt-in local-only override for previewing the Commitment Desk UI
+// without a working OpenAI key — it swaps in the honest, test-verified scripted gateway
+// for exactly the three seeded demo cases (see gateway/demoModelGateway.ts) and throws a
+// clear error for any other case rather than silently answering for it.
+const DESK_DEMO_TIMEOUT_MS = 2_000;
+
+// Demo mode deliberately never calls getOpenAIClient() — the whole point is previewing
+// the desk without a working (or even present) OPENAI_API_KEY.
+async function resolveGateway(caseId: string): Promise<{ gateway: ModelGateway; modelId: string; timeoutMs: number }> {
+  if (process.env.DESK_MODEL_MODE !== "demo") {
+    const { client, modelId, timeoutMs } = getOpenAIClient();
+    return { gateway: new OpenAIModelGateway(client, modelId), modelId, timeoutMs };
+  }
+  const dealCase = await db.dealCase.findUniqueOrThrow({ where: { id: caseId } });
+  const terms = await db.termsVersion.findFirstOrThrow({ where: { caseId, version: dealCase.activeTermsVersion } });
+  const demoGateway = createDeskDemoGateway(terms.sku);
+  if (!demoGateway) {
+    throw new ToolError("INVALID_INPUT", `DESK_MODEL_MODE=demo has no scripted answer for sku "${terms.sku}" — only the three seeded desk demo fixtures are supported.`, false);
+  }
+  return { gateway: demoGateway, modelId: "desk-demo-v1", timeoutMs: DESK_DEMO_TIMEOUT_MS };
+}
 
 // Operator-triggered: "run this intake case through the six-agent evaluation and, if it
 // clears, commit it" (runB2BEvaluation.ts). Unlike B2C's respond/route.ts, there is no
@@ -22,8 +48,7 @@ export async function POST(_request: Request, { params }: { params: { id: string
   }
 
   try {
-    const { client, modelId, timeoutMs } = getOpenAIClient();
-    const gateway = new OpenAIModelGateway(client, modelId);
+    const { gateway, modelId, timeoutMs } = await resolveGateway(params.id);
     const result = await runB2BEvaluation(db, gateway, {
       caseId: params.id,
       modelId,
