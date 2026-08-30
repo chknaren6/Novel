@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { testDb, resetTestDb } from "@/lib/testDb";
-import { runDealSubmitted, B2C_REQUIRED_DOMAINS } from "./dealSubmitted";
+import { runDealSubmitted } from "./dealSubmitted";
 import { seedFixture } from "@/fixtures/seedFixture";
 import { FIXTURE_FEASIBLE_AFTER_ADVANCE, type FixtureDefinition } from "@/fixtures/definitions";
 import { FakeModelGateway } from "@/gateway/fakeGateway";
@@ -184,11 +184,5 @@ describe("runDealSubmitted", () => {
     expect(certifiedReservationIds).not.toContain(supplierReservation.id);
     const reloadedSupplierReservation = await testDb.reservation.findUniqueOrThrow({ where: { id: supplierReservation.id } });
     expect(reloadedSupplierReservation.status).toBe("released");
-  });
-});
-
-describe("B2C_REQUIRED_DOMAINS", () => {
-  it("is exactly ['supplier'] — B2C never extends credit and doesn't hold its own inventory", () => {
-    expect(B2C_REQUIRED_DOMAINS).toEqual(["supplier"]);
   });
 });

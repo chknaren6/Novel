@@ -20,18 +20,6 @@ export interface RunDealSubmittedInput {
 const DESTINATION_ID = "ZONE-SOUTH";
 const REQUIRED_BASE_DOMAINS: ReservationDomain[] = ["credit", "inventory", "logistics"];
 
-// B2C's required-domain set is deliberately different from B2B's REQUIRED_BASE_DOMAINS
-// above: B2C never extends credit (commitos-b2c-product-spec.md §9, "does not extend
-// credit to buyers") and, because it never places a supplier order until the buyer's
-// advance is received (§4, "This eliminates inventory risk"), it never carries its own
-// inventory exposure either — so "credit" and "inventory" never apply here. Only
-// "supplier" (the confirmed purchase order) is required; "logistics" is added by the
-// future B2C workflow only when CommitOS books third-party freight itself, mirroring
-// how the `requiredDomains` derivation below (not REQUIRED_BASE_DOMAINS itself, which
-// is static) conditionally adds "supplier" on a shortfall. Not yet consumed by any
-// workflow — that's the next plan (the actual B2C evaluate/route flow).
-export const B2C_REQUIRED_DOMAINS: ReservationDomain[] = ["supplier"];
-
 // 1. Sales normalizes. 2. Finance/Inventory/Procurement/Logistics run concurrently.
 // 3. Risk runs against their evidence. 4. Deterministic feasibility check. 5. Route to
 // prepared, negotiating (30% advance counteroffer), or cannot_commit.
