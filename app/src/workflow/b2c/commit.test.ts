@@ -48,4 +48,21 @@ describe("runB2CCommit", () => {
     const updatedCase = await testDb.dealCase.findUniqueOrThrow({ where: { id: dealCase.id } });
     expect(updatedCase.status).toBe("escalated");
   });
+
+  it("throws instead of silently zeroing economics when the terms row is missing negotiated fields", async () => {
+    const company = await testDb.company.create({ data: { name: "CommitOS" } });
+    const buyer = await testDb.marketplaceBuyer.create({ data: { name: "Ramesh Traders", phone: "+91-90000-00001" } });
+    const dealCase = await testDb.dealCase.create({
+      data: { companyId: company.id, customerId: buyer.id, channel: "b2c", activeTermsVersion: 1, status: "prepared", createdBy: "test" },
+    });
+    const deliveryDeadline = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000);
+    const termsHash = canonicalTermsHash({ sku: "SKU-1", quantity: 10, totalValueMinor: 1_325_000, discountBps: 0, paymentTerms: "ADVANCE_VARIABLE", deliveryDeadline: deliveryDeadline.toISOString() });
+    await testDb.termsVersion.create({
+      data: { caseId: dealCase.id, version: 1, source: "buyer_request", termsHash, sku: "SKU-1", quantity: 10, totalValueMinor: 1_325_000, discountBps: 0, paymentTerms: "ADVANCE_VARIABLE", deliveryDeadline, advanceBps: null, confirmedBuyPriceMinor: null },
+    });
+    const reservation = await createHeldReservation(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash, domain: "supplier", resourceRef: "SUPPLIER:VEND-A:SKU-1", quantityMinor: 10, limitMinor: null, policyVersion: "supplier-policy-v1", ttlSeconds: 43_200, idempotencyKey: `test-${dealCase.id}` });
+    await prepareCommitCertificate(testDb, { caseId: dealCase.id, caseVersion: 1, termsHash, reservationIds: [reservation.id], requiredDomains: B2C_REQUIRED_DOMAINS });
+
+    await expect(runB2CCommit(testDb, { caseId: dealCase.id, traceId: "trace-3" })).rejects.toThrow(/missing negotiated economics/);
+  });
 });
