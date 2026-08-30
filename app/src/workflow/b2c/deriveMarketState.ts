@@ -46,13 +46,19 @@ export function deriveMarketState(
   if (eventTypes.has("case.prepared")) {
     return { stage: "preparing", label: STAGE_LABELS.preparing, certificateReady: false, sellPriceMinor: termsTotalValueMinor, reason: null };
   }
-  // Reached by "intake" (a case that hasn't even been fully created yet — not
-  // observable in practice, createB2CCase creates the row and the terms in one
-  // transaction-adjacent sequence), "prepared"/"committing" before their case.prepared
-  // event lands (buyerResponse.ts's own documented crash-window limitation — see its
-  // comment above the accepted-replay branch), and "negotiating" (B2B-only, never
-  // reachable for a B2C case). All fall back to the same "still in progress" label,
-  // which is honest for "committing" and merely imprecise (not wrong) for the other two
-  // rare/unreachable cases.
+  // Reached by "intake" (dealCase.create, termsVersion.create, and
+  // transitionCase(...->evaluating) are separate non-transactional statements in
+  // createCase.ts, so a crash between the first and the last leaves a case at "intake"
+  // with no events recorded yet — the same class of crash-window gap as "prepared"
+  // below) and "prepared" before its case.prepared event lands (buyerResponse.ts's own
+  // documented crash-window limitation — see its comment above the accepted-replay
+  // branch). "committing" is NOT reached here: buyerResponse.ts awaits
+  // emitCaseEvent("case.prepared") to completion before ever calling runB2CCommit (the
+  // only path into "committing" — see commit.ts and transitions.ts), so by the time a
+  // case's status is "committing" the eventTypes.has("case.prepared") check above has
+  // already matched and returned "preparing", which is the correct, intended label for
+  // "committing". "negotiating" is B2B-only and never reachable for a B2C case. The two
+  // cases that genuinely do land here ("intake", "prepared" mid-crash) fall back to the
+  // same "still in progress" label, which is imprecise (not wrong) for both.
   return { stage: "awaiting_buyer_response", label: STAGE_LABELS.awaiting_buyer_response, certificateReady: false, sellPriceMinor: termsTotalValueMinor, reason: null };
 }

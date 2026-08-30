@@ -73,4 +73,13 @@ describe("deriveMarketState", () => {
     const state = deriveMarketState({ status: "prepared" }, [], 1_325_000);
     expect(state.stage).toBe("awaiting_buyer_response");
   });
+
+  it("is preparing for a committing case, because case.prepared is always recorded before runB2CCommit is ever called", () => {
+    // buyerResponse.ts awaits emitCaseEvent("case.prepared") to completion before calling
+    // runB2CCommit, and commit.ts only transitions prepared->committing inside
+    // runB2CCommit — so a "committing" case is caught by the eventTypes.has("case.prepared")
+    // check above, not by the default fallback.
+    const state = deriveMarketState({ status: "committing" }, [event("case.prepared")], 1_325_000);
+    expect(state.stage).toBe("preparing");
+  });
 });
