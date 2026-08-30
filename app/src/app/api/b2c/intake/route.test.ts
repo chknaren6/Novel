@@ -52,4 +52,28 @@ describe("POST /api/b2c/intake", () => {
     const response = await POST(request);
     expect(response.status).toBe(502);
   });
+
+  it("returns 400 when the request body is not valid JSON", async () => {
+    const request = new Request("http://localhost/api/b2c/intake", { method: "POST", body: "not-json{{{" });
+    const response = await POST(request);
+    expect(response.status).toBe(400);
+  });
+
+  it("returns 400 when sku is missing", async () => {
+    const request = new Request("http://localhost/api/b2c/intake", { method: "POST", body: JSON.stringify({ rawText: "some text" }) });
+    const response = await POST(request);
+    expect(response.status).toBe(400);
+  });
+
+  it("returns 200 with an empty candidates array when no supplier matches the sku", async () => {
+    mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify(PARSED) } }] });
+    const request = new Request("http://localhost/api/b2c/intake", {
+      method: "POST",
+      body: JSON.stringify({ rawText: "Need 500 metres of 4mm copper wire, delivery by 15 September, Bangalore", sku: "SKU-NONEXISTENT" }),
+    });
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.candidates).toEqual([]);
+  });
 });

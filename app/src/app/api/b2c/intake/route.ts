@@ -10,7 +10,12 @@ import { ToolError } from "@/lib/types";
 // for why). The operator supplies it directly, the same way they later supply the
 // negotiated price: a human fills the gap the backend doesn't automate.
 export async function POST(request: Request) {
-  const body = await request.json();
+  let body: { rawText?: unknown; sku?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "request body must be valid JSON" }, { status: 400 });
+  }
   const rawText = typeof body?.rawText === "string" ? body.rawText : null;
   const sku = typeof body?.sku === "string" ? body.sku : null;
   if (!rawText) return NextResponse.json({ error: "rawText is required" }, { status: 400 });
