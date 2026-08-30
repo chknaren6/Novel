@@ -46,5 +46,39 @@ describe("seedFixture", () => {
     expect(cases).toHaveLength(3);
     const plans = await testDb.deliveryPlanOption.findMany({ where: { planId: "RT-BLR-HYD" } });
     expect(plans).toHaveLength(1); // shared plan reset in place, not duplicated
+
+    // All three fixtures write the same MAT-10001/WH-BLR inventory row and the same
+    // VEND-2003/MAT-10001 supplier row (see definitions.ts). Neither table has a
+    // @@unique constraint on its natural key, so without the natural-key reset in
+    // seedFixture.ts these would silently accumulate to 3 rows each instead of 1.
+    const positions = await testDb.inventoryPosition.findMany({ where: { sku: "MAT-10001", warehouseId: "WH-BLR" } });
+    expect(positions).toHaveLength(1);
+    const supplierOptions = await testDb.supplierOption.findMany({ where: { supplierId: "VEND-2003", sku: "MAT-10001" } });
+    expect(supplierOptions).toHaveLength(1);
+  });
+
+  it("clears cross-table rows scoped to the old case, not just the case row itself, when re-seeding", async () => {
+    const first = await seedFixture(testDb, FIXTURE_FEASIBLE_AFTER_ADVANCE);
+
+    // Insert a row into one of the tables deleteCaseAndRelations is responsible for
+    // cleaning up, scoped to the case that is about to be reset away.
+    await testDb.reservation.create({
+      data: {
+        caseId: first.dealCase.id,
+        caseVersion: 1,
+        termsHash: first.termsHash,
+        domain: "inventory",
+        resourceRef: "MAT-10001",
+        status: "held",
+        policyVersion: "credit-policy-v1",
+        expiresAt: new Date(Date.now() + 900_000),
+        idempotencyKey: "seedFixture-test-reservation",
+      },
+    });
+
+    await seedFixture(testDb, FIXTURE_FEASIBLE_AFTER_ADVANCE);
+
+    const reservations = await testDb.reservation.findMany({ where: { caseId: first.dealCase.id } });
+    expect(reservations).toHaveLength(0);
   });
 });

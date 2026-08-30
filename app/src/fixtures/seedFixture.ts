@@ -19,8 +19,9 @@ async function deleteCaseAndRelations(db: PrismaClient, caseId: string) {
 }
 
 // Inserts one isolated company/case per fixture, or resets that fixture's own
-// namespace transactionally if it already exists. It never touches a case that is not
-// tagged with this fixture id.
+// namespace if it already exists. The reset (deleteCaseAndRelations) is a sequence of
+// awaited deletes, not wrapped in a single db.$transaction — it is not atomic. It never
+// touches a case that is not tagged with this fixture id.
 export async function seedFixture(db: PrismaClient, fixture: FixtureDefinition) {
   const existing = await db.dealCase.findFirst({ where: { fixtureId: fixture.fixtureId } });
   if (existing) await deleteCaseAndRelations(db, existing.id);
@@ -44,10 +45,13 @@ export async function seedFixture(db: PrismaClient, fixture: FixtureDefinition) 
   // caseId (no such column exists on these models), and CASE-STALE-SUPPLIER-HOLD
   // deliberately reuses the exact same sku/supplierId/planId as
   // CASE-FEASIBLE-AFTER-ADVANCE (its staleness is injected by the test, not by
-  // different seed data). DeliveryPlanOption.planId is also globally @unique. So a
-  // blind create() here would throw a unique-constraint error both on re-seeding the
-  // same fixture and when seeding the full fixture list in one run — reset each row
-  // by its natural key first, upsert-style.
+  // different seed data). InventoryPosition and SupplierOption have no @@unique
+  // constraint on their natural key (sku+warehouseId / supplierId+sku), so a blind
+  // create() here would NOT throw — it would silently accumulate duplicate rows on
+  // every re-seed, both when re-seeding the same fixture and when seeding the full
+  // fixture list in one run. So each row is reset by its natural key first
+  // (deleteMany, then create), upsert-style. DeliveryPlanOption.planId IS globally
+  // @unique, so that table below uses a real db.upsert() instead.
   for (const position of fixture.inventory) {
     await db.inventoryPosition.deleteMany({ where: { sku: position.sku, warehouseId: position.warehouseId } });
     await db.inventoryPosition.create({ data: position });
