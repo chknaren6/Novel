@@ -43,6 +43,18 @@ export interface MutationToolContext {
   paymentTerms: PaymentTerms;
 }
 
+// NOTE: Each mutation tool below does `rawArgs as {...}` with no runtime validation.
+// openaiGateway.ts's toOpenAITool does NOT set `strict: true` on the function
+// definition (unlike the final response_format=json_schema call), so nothing
+// guarantees the model's parsed JSON tool-call arguments actually match the shape
+// cast to here before this function runs — e.g. a missing field becomes `undefined`,
+// which Prisma can silently treat as "field not provided" in a `where`/`data` clause
+// rather than throwing (concretely: an `undefined` quantity would drop the
+// `availableQuantity: { gte: undefined }` guard in inventoryAdapter.ts's
+// holdInventory, silently passing the check it's meant to enforce). Known, deferred
+// gap for this P0 pass — not an oversight. Full fix would be per-tool runtime
+// validation (e.g. a zod schema, mirroring fakeGateway.ts's `.safeParse` pattern)
+// converting a mismatch into `ToolError("INVALID_INPUT", ...)`.
 export function buildMutationTool(db: PrismaClient, role: RoleId, ctx: MutationToolContext): ToolDefinition | null {
   const name = MUTATION_TOOL_BY_ROLE[role];
   if (!name) return null;

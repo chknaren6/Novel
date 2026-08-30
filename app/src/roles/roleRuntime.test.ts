@@ -66,12 +66,48 @@ describe("runRoleAgent", () => {
 
   it("marks the role unavailable and still persists a decision when the gateway never responds", async () => {
     const dealCase = await seedCase();
-    const neverRespondingGateway: ModelGateway = { runRole: () => new Promise(() => {}) };
+    let calls = 0;
+    const neverRespondingGateway: ModelGateway = {
+      runRole: () => {
+        calls++;
+        return new Promise(() => {});
+      },
+    };
 
     const decision = await runRoleAgent(testDb, neverRespondingGateway, baseInput(dealCase), "fake-model-v1");
     expect(decision.decision).toBe("unavailable");
+    // Confirms runRoleAgent actually retried once (attempt + one retry = 2 calls), not
+    // that it simply gave up after the first timeout.
+    expect(calls).toBe(2);
 
     const stored = await testDb.domainDecision.findUniqueOrThrow({ where: { id: decision.decisionId } });
     expect(stored.decision).toBe("unavailable");
+  }, 10_000);
+
+  it("recovers on retry: persists the second attempt's decision after the first attempt times out", async () => {
+    const dealCase = await seedCase();
+    let calls = 0;
+    const fakeGateway = new FakeModelGateway(() => ({
+      toolCall: { name: "hold_inventory", args: { warehouseId: "WH-BLR", quantity: 199, ttlSeconds: 600 } },
+      output: { decision: "counter", constraints: [], reservationRequests: [], counterterms: [], evidenceRefs: ["EVID-1"], explanation: "Recovered on retry." },
+    }));
+    const gateway: ModelGateway = {
+      runRole: (input) => {
+        calls++;
+        // First attempt never resolves, forcing the timeout path; second attempt
+        // delegates to a real FakeModelGateway run so the retry's own output (not the
+        // "unavailable" fallback) is what gets persisted.
+        if (calls === 1) return new Promise(() => {});
+        return fakeGateway.runRole(input);
+      },
+    };
+
+    const decision = await runRoleAgent(testDb, gateway, baseInput(dealCase), "fake-model-v1");
+    expect(calls).toBe(2);
+    expect(decision.decision).toBe("counter");
+    expect(decision.explanation).toBe("Recovered on retry.");
+
+    const stored = await testDb.domainDecision.findUniqueOrThrow({ where: { id: decision.decisionId } });
+    expect(stored.decision).toBe("counter");
   }, 10_000);
 });

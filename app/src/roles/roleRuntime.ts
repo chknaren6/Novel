@@ -30,6 +30,19 @@ export async function runRoleAgent(db: PrismaClient, gateway: ModelGateway, inpu
 
   const attempt = () => withTimeout(gateway.runRole({ role: input.role, systemPrompt, contextSummary: input.contextSummary, readTools, mutationTool, timeoutMs: input.timeoutMs }), input.timeoutMs);
 
+  // KNOWN P0 LIMITATION (not an oversight): a retry below is a fresh LLM reasoning
+  // round, not a replay — nothing guarantees the second attempt requests the same
+  // tool-call args as the first. The mutation-tool adapters derive their idempotency
+  // key from caseId/caseVersion/actionType/resourceRef only, deliberately
+  // content-independent (see deriveIdempotencyKey in policy/idempotency.ts), under the
+  // documented assumption that "retries pass the identical input and therefore reuse
+  // the identical key". If attempt 1 already created a reservation and a later step
+  // then failed/timed out, and attempt 2's model requests different args (e.g. a
+  // different quantity) at the same resourceRef, the adapter will silently return
+  // attempt 1's existing reservation instead of attempt 2's actual request — with no
+  // error and no log entry. Comparing/validating args across attempts and raising
+  // IDEMPOTENCY_CONFLICT on mismatch is the correct fix but is out of scope for this
+  // pass (mirrors the accepted gap documented in receipts/actionReceipt.ts).
   try {
     const result = await attempt();
     return persistDecision(db, input, result.output, result.modelId, result.gatewayRequestId);
@@ -46,7 +59,13 @@ export async function runRoleAgent(db: PrismaClient, gateway: ModelGateway, inpu
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  return Promise.race([promise, new Promise<T>((_, reject) => setTimeout(() => reject(new Error("Role run timed out")), timeoutMs))]);
+  let handle: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    handle = setTimeout(() => reject(new Error("Role run timed out")), timeoutMs);
+  });
+  // Clear the timer on either outcome so a settled `promise` (the common case) doesn't
+  // leave an orphaned setTimeout running for the rest of timeoutMs.
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(handle));
 }
 
 async function persistDecision(db: PrismaClient, input: RunRoleAgentInput, output: RoleModelOutput, modelId: string, gatewayRequestId: string | null): Promise<DomainDecision> {
