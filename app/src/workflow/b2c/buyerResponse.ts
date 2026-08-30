@@ -30,6 +30,13 @@ export async function runB2CBuyerResponse(db: PrismaClient, input: RunB2CBuyerRe
   const counteroffer = await db.counteroffer.findUnique({ where: { tokenHash: hashBuyerToken(input.buyerToken) } });
   if (!counteroffer) return { status: "invalid_or_expired" };
 
+  // Replaying an accepted token when the case is already `committed` or `escalated`
+  // returns the prior outcome instead of re-mutating (see tests below). Any other
+  // dealCase.status here (e.g. `prepared`/`committing`, reachable only if a prior
+  // invocation crashed mid-function after transitioning but before runB2CCommit
+  // finished) falls through to `cannot_commit` below — a rare crash-window
+  // mislabeling, not a normal-path outcome. Left as a known limitation rather than a
+  // new result variant, since no code path in this plan can currently produce it.
   if (counteroffer.status === "accepted") {
     const dealCase = await db.dealCase.findUniqueOrThrow({ where: { id: counteroffer.caseId } });
     if (dealCase.status === "committed") {
