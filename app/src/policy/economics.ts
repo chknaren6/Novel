@@ -57,8 +57,4 @@ export const ADVANCE_DEPOSIT_BPS = 3000;
 // Task 23 documents how 293_312 (MBEW.STPRS) was chosen for MAT-10001.
 export const SKU_UNIT_COST_MINOR: Record<string, number> = {
   "MAT-10001": 293_312,
-  // MBEW.STPRS for MAT-CG-10008 (Rs 28,037.70) — added for the live Crompton-data demo
-  // (order SO-13183661); without an entry here, evaluateAndRoute's `?? 0` fallback would
-  // silently price this SKU's cost at zero and inflate the displayed contribution margin.
-  "MAT-CG-10008": 2_803_770,
 };
