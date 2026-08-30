@@ -40,4 +40,13 @@ describe("parseB2CRequirement", () => {
     const client = fakeClient([{ choices: [{ message: { content: "not json" } }] }]);
     await expect(parseB2CRequirement(client, "gpt-5-nano", "some text", 30_000)).rejects.toThrow(ToolError);
   });
+
+  it("wraps a schema-violating but well-formed response as ToolError INVALID_INPUT", async () => {
+    const INVALID = {
+      itemDescription: "steel rod", quantity: -5, unit: "kg",
+      deliveryDeadline: "2026-09-15", location: "Chennai", missingCriticalField: null,
+    };
+    const client = fakeClient([{ choices: [{ message: { content: JSON.stringify(INVALID) } }] }]);
+    await expect(parseB2CRequirement(client, "gpt-5-nano", "some text", 30_000)).rejects.toThrow(ToolError);
+  });
 });
