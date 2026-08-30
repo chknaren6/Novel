@@ -61,5 +61,11 @@ describe("B2C end-to-end: intake -> check -> create -> accept -> commit", () => 
       "commit.requested",
       "case.committed",
     ]);
+
+    const reservation = await testDb.reservation.findFirstOrThrow({ where: { caseId: created.caseId, domain: "supplier" } });
+    expect(reservation.status).toBe("committed");
+
+    const certificate = await testDb.commitCertificate.findFirstOrThrow({ where: { caseId: created.caseId, caseVersion: 1 } });
+    expect(certificate.status).toBe("consumed");
   });
 });
