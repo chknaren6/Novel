@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { RoleModelOutputSchema, DomainDecisionSchema, RoleIdSchema } from "./types";
+import { RoleModelOutputSchema, DomainDecisionSchema, RoleIdSchema, PaymentTermsSchema } from "./types";
 
 describe("RoleIdSchema", () => {
   it("accepts the six locked roles and rejects others", () => {
@@ -56,5 +56,14 @@ describe("DomainDecisionSchema", () => {
       explanation: "Net-60 breaches credit policy; 30% advance is within policy.",
     });
     expect(parsed.role).toBe("finance");
+  });
+});
+
+describe("PaymentTermsSchema", () => {
+  it("accepts the existing B2B terms plus the new B2C variable-advance term", () => {
+    for (const term of ["NET_60", "ADVANCE_30", "OTHER_BOUNDED", "ADVANCE_VARIABLE"]) {
+      expect(PaymentTermsSchema.parse(term)).toBe(term);
+    }
+    expect(() => PaymentTermsSchema.parse("NET_90")).toThrow();
   });
 });

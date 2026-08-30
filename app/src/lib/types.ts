@@ -72,7 +72,9 @@ export const CaseStatusSchema = z.enum([
 ]);
 export type CaseStatus = z.infer<typeof CaseStatusSchema>;
 
-export const PaymentTermsSchema = z.enum(["NET_60", "ADVANCE_30", "OTHER_BOUNDED"]);
+// ADVANCE_VARIABLE is B2C-only: the advance percentage is negotiated per order
+// (see TermsVersion.advanceBps), not fixed like the B2B ADVANCE_30 counterterm.
+export const PaymentTermsSchema = z.enum(["NET_60", "ADVANCE_30", "OTHER_BOUNDED", "ADVANCE_VARIABLE"]);
 export type PaymentTerms = z.infer<typeof PaymentTermsSchema>;
 
 export const TermsSourceSchema = z.enum([

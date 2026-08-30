@@ -34,6 +34,18 @@ model Customer {
   policyVersion           String
 }
 
+// A B2C buyer's identity. Deliberately separate from Customer, which is entirely
+// trade-credit shaped (creditLimitMinor, currentExposureMinor, allowedPaymentTerms) —
+// none of that applies to a B2C buyer, who always pays advance/full upfront and is
+// never extended credit (commitos-b2c-product-spec.md §9).
+model MarketplaceBuyer {
+  id        String   @id @default(uuid())
+  name      String
+  phone     String
+  email     String?
+  createdAt DateTime @default(now())
+}
+
 model InventoryPosition {
   id                 String    @id @default(uuid())
   sku                String
@@ -51,6 +63,12 @@ model SupplierOption {
   leadDays          Int
   optionTtlSeconds  Int
   status            String
+  // B2C only. Data-freshness tier per commitos-b2c-product-spec.md §6 ("tier1" =
+  // real-time webhook, "tier2" = 15-30min polling, "tier3" = daily snapshot).
+  // Validated at the application layer, not a DB-level enum — consistent with how
+  // PaymentTerms/RoleId are handled elsewhere in this schema.
+  freshnessTier  String?
+  lastVerifiedAt DateTime?
 }
 
 model DeliveryPlanOption {
@@ -71,6 +89,9 @@ model DealCase {
   company            Company             @relation(fields: [companyId], references: [id])
   customerId         String
   fixtureId          String?
+  // "b2b" (default, every existing row) or "b2c". Lets a query or dashboard tell the
+  // two apart without inferring it from which table customerId happens to point at.
+  channel            String              @default("b2b")
   activeTermsVersion Int
   status             String
   createdBy          String
@@ -99,6 +120,14 @@ model TermsVersion {
   totalValueMinor  Int
   discountBps      Int
   paymentTerms     String
+  // B2C only. Meaningful only when paymentTerms == "ADVANCE_VARIABLE"; null for every
+  // B2B row and every non-advance B2C row.
+  advanceBps             Int?
+  // B2C only. The buy price negotiated with the supplier for this specific order —
+  // B2C has no fixed per-SKU cost table (unlike SKU_UNIT_COST_MINOR), because buy
+  // price is discovered live per order, not looked up from a catalog. Null until
+  // supplier negotiation concludes.
+  confirmedBuyPriceMinor Int?
   deliveryDeadline DateTime
   createdAt        DateTime @default(now())
 
