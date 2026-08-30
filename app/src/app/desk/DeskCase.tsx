@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { INK, SUB, MUTE, LINE, OK, WARN, BAD, SANS, SERIF, MONO } from "@/app/market/styles";
-import type { DeskStage, RoleDecision, RoleStatus } from "@/workflow/deriveDeskState";
+import { useEffect, useRef, useState } from "react";
+import { INK, SUB, MUTE, LINE, OK, BAD, SANS, SERIF, MONO } from "@/app/market/styles";
+import type { DeskStage, RoleStatus } from "@/workflow/deriveDeskState";
+import { SixDots } from "./SixDots";
+import { DeskDiagram } from "./DeskDiagram";
+import { DeskChecklist } from "./DeskChecklist";
+import { buildDiagramNodes, buildPipeStates, buildDots, REVEAL_STEPS, type OutcomeKind } from "./deskDiagramData";
 
 type SubmitResult =
   | { status: "committed"; certificateId: string; receipts: unknown; depositMinor: number }
@@ -19,28 +23,19 @@ type DeskViewState = {
   counterofferTerms: { paymentTerms: string; totalValueMinor: number } | null;
 };
 
-const TERMINAL_STAGES = new Set<DeskStage>(["committed", "cannot_commit", "escalated"]);
-
-const DECISION_COLOR: Record<RoleDecision, string> = {
-  approve: OK,
-  counter: WARN,
-  veto: BAD,
-  unavailable: MUTE,
-  pending: MUTE,
-};
-
-const DECISION_LABEL: Record<RoleDecision, string> = {
-  approve: "Approve",
-  counter: "Counter",
-  veto: "Veto",
-  unavailable: "Unavailable",
-  pending: "Waiting…",
-};
+const OUTCOME_KIND: Partial<Record<DeskStage, OutcomeKind>> = { committed: "ok", negotiating: "warn", cannot_commit: "bad", escalated: "bad" };
 
 const label = { font: `400 10.5px ${MONO}`, letterSpacing: ".14em", color: MUTE, textTransform: "uppercase" as const };
 
 function formatMinor(minor: number): string {
   return `₹${(minor / 100).toFixed(2)}`;
+}
+
+function coordinatorWhy(state: DeskViewState): string {
+  if (state.stage === "committed") return "Every required domain had a matching hold; a certificate was issued.";
+  if (state.stage === "negotiating") return "Every domain but credit was covered — sent back with a revised payment term.";
+  if (state.stage === "cannot_commit" || state.stage === "escalated") return `Could not commit: ${state.reason ?? "unknown reason"}.`;
+  return "Verifying every hold is in place…";
 }
 
 export function DeskCase({
@@ -66,32 +61,25 @@ export function DeskCase({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [result, setResult] = useState<SubmitResult | null>(null);
   const [buyerLink, setBuyerLink] = useState<string | null>(null);
-  const [state, setState] = useState<DeskViewState | null>(null);
+  const [finalState, setFinalState] = useState<DeskViewState | null>(null);
+  const [revealedSteps, setRevealedSteps] = useState(0);
+  const [view, setView] = useState<"diagram" | "list">("diagram");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const submitted = result !== null;
 
+  // Plays the reveal animation over already-final, already-confirmed data (finalState),
+  // pacing disclosure rather than simulating anything the backend hasn't actually
+  // decided — see deskDiagramData.ts's own comment on REVEAL_STEPS.
   useEffect(() => {
-    if (!submitted) return;
-    let cancelled = false;
-    async function poll() {
-      const res = await fetch(`/api/b2b/cases/${caseId}`);
-      if (cancelled) return;
-      if (res.ok) {
-        const body = await res.json();
-        setState(body.state);
-      }
-    }
-    poll();
-    const interval = setInterval(() => {
-      if (state && TERMINAL_STAGES.has(state.stage)) return;
-      poll();
-    }, 2500);
+    if (!finalState) return;
+    const step = REVEAL_STEPS[revealedSteps];
+    if (!step) return;
+    timerRef.current = setTimeout(() => setRevealedSteps((s) => s + 1), step.delayMs);
     return () => {
-      cancelled = true;
-      clearInterval(interval);
+      if (timerRef.current) clearTimeout(timerRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [caseId, submitted, state?.stage]);
+  }, [finalState, revealedSteps]);
 
   async function runEvaluation() {
     setSubmitError(null);
@@ -105,6 +93,15 @@ export function DeskCase({
         setBuyerLink(`${window.location.origin}/desk/${caseId}/respond?token=${encodeURIComponent(r.buyerToken)}`);
       }
       setResult(r);
+
+      // The submit response doesn't carry the six-role decisions — fetch the case's
+      // real, already-persisted state once so the reveal animation has real content to
+      // pace out, rather than enriching SubmitResult's shape just for this.
+      const stateRes = await fetch(`/api/b2b/cases/${caseId}`);
+      if (stateRes.ok) {
+        const stateBody = await stateRes.json();
+        setFinalState(stateBody.state);
+      }
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -112,12 +109,18 @@ export function DeskCase({
     }
   }
 
+  const outcomeKind = finalState ? OUTCOME_KIND[finalState.stage] ?? null : null;
+  const settled = revealedSteps >= REVEAL_STEPS.length;
+  const nodes = finalState ? buildDiagramNodes(finalState.roles, revealedSteps, outcomeKind, coordinatorWhy(finalState), finalState.certificateId) : [];
+  const pipes = buildPipeStates(revealedSteps);
+  const dots = finalState ? buildDots(finalState.roles, revealedSteps) : [];
+
   return (
-    <div style={{ maxWidth: 760, margin: "0 auto", padding: "42px 40px" }}>
+    <div style={{ maxWidth: 800, margin: "0 auto", padding: "42px 40px" }}>
       <h2 style={{ font: `500 30px/1.2 ${SERIF}`, letterSpacing: "-.012em", margin: 0, color: INK }}>{companyName}</h2>
       <p style={{ font: `400 15px/1.6 ${SANS}`, color: SUB, margin: "10px 0 0" }}>{customerName}</p>
 
-      <div style={{ display: "flex", gap: 32, marginTop: 20, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 32, marginTop: 20, flexWrap: "wrap", borderBottom: `1px solid ${LINE}`, paddingBottom: 20 }}>
         <div>
           <div style={label}>SKU</div>
           <div style={{ font: `400 15px ${SANS}`, marginTop: 6, color: INK }}>{sku}</div>
@@ -148,71 +151,73 @@ export function DeskCase({
           onClick={runEvaluation}
           style={{ marginTop: 24, font: `500 14px ${SANS}`, color: "#fff", background: INK, border: "none", borderRadius: 8, padding: "12px 20px", cursor: "pointer" }}
         >
-          {submitting ? "Running evaluation…" : "Run evaluation"}
+          {submitting ? "Running evaluation…" : "Check and commit"}
         </button>
       )}
 
       {submitted && (
         <>
-          <div style={{ marginTop: 28, padding: "20px 0", borderTop: `1px solid ${LINE}` }}>
-            <div style={label}>Six-role checklist</div>
-            <div style={{ marginTop: 12 }}>
-              {(state?.roles ?? []).map((role) => (
-                <div key={role.role} style={{ padding: "12px 0", borderBottom: "1px solid #EDEAE1" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span
-                      style={{
-                        font: `600 11px ${MONO}`,
-                        letterSpacing: ".06em",
-                        textTransform: "uppercase" as const,
-                        color: "#fff",
-                        background: DECISION_COLOR[role.decision],
-                        borderRadius: 5,
-                        padding: "3px 8px",
-                        opacity: role.decision === "pending" ? 0.55 : 1,
-                        border: role.decision === "pending" ? `1px dashed ${MUTE}` : "none",
-                      }}
-                    >
-                      {DECISION_LABEL[role.decision]}
-                    </span>
-                    <span style={{ font: `500 15px ${SANS}`, color: INK, textTransform: "capitalize" as const }}>{role.role}</span>
-                  </div>
-                  {role.explanation && (
-                    <p style={{ font: `400 13.5px/1.6 ${SANS}`, color: SUB, marginTop: 6 }}>{role.explanation}</p>
-                  )}
-                </div>
-              ))}
-            </div>
+          <div style={{ marginTop: 28, display: "flex", alignItems: "center", gap: 16 }}>
+            <SixDots dots={dots} />
+            <span style={{ font: `400 13.5px ${SANS}`, color: SUB }}>
+              {!finalState
+                ? "Six-role evaluation in progress."
+                : settled
+                  ? "All six checked · answer ready"
+                  : `${dots.filter((d) => !d.pulsing && d.color !== "#D8D5C9").length} of six answered`}
+            </span>
           </div>
 
-          {state?.stage === "committed" && (
+          <div style={{ marginTop: 24, display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+            <div style={label}>The six checks</div>
+            <div style={{ display: "flex", gap: 16 }}>
+              <button
+                onClick={() => setView("diagram")}
+                style={{ font: `500 13px ${SANS}`, background: "none", border: "none", padding: 0, cursor: "pointer", color: view === "diagram" ? INK : MUTE, borderBottom: view === "diagram" ? `2px solid ${INK}` : "2px solid transparent" }}
+              >
+                Diagram
+              </button>
+              <button
+                onClick={() => setView("list")}
+                style={{ font: `500 13px ${SANS}`, background: "none", border: "none", padding: 0, cursor: "pointer", color: view === "list" ? INK : MUTE, borderBottom: view === "list" ? `2px solid ${INK}` : "2px solid transparent" }}
+              >
+                List
+              </button>
+            </div>
+          </div>
+          <p style={{ font: `400 12.5px ${SANS}`, color: MUTE, margin: "6px 0 0" }}>{view === "diagram" ? "Hover a box for the reasoning." : ""}</p>
+
+          {finalState && view === "diagram" && <DeskDiagram nodes={nodes} pipes={pipes} />}
+          {finalState && view === "list" && <DeskChecklist nodes={nodes} />}
+
+          {settled && finalState?.stage === "committed" && (
             <div style={{ marginTop: 24, padding: "16px", border: `1px solid ${OK}`, borderRadius: 8 }}>
               <div style={{ font: `600 14px ${SANS}`, color: OK }}>Committed — certificate issued.</div>
-              {state.certificateId && (
-                <div style={{ font: `400 13px ${MONO}`, color: SUB, marginTop: 8, wordBreak: "break-all" }}>{state.certificateId}</div>
+              {finalState.certificateId && (
+                <div style={{ font: `400 13px ${MONO}`, color: SUB, marginTop: 8, wordBreak: "break-all" }}>{finalState.certificateId}</div>
               )}
             </div>
           )}
 
-          {(state?.stage === "cannot_commit" || state?.stage === "escalated") && (
+          {settled && (finalState?.stage === "cannot_commit" || finalState?.stage === "escalated") && (
             <div style={{ marginTop: 24, padding: "16px", border: `1px solid ${BAD}`, borderRadius: 8 }}>
               <div style={{ font: `600 14px ${SANS}`, color: BAD }}>This needs your attention</div>
-              <p style={{ font: `400 14px/1.6 ${SANS}`, color: SUB, marginTop: 6 }}>{state.reason}</p>
+              <p style={{ font: `400 14px/1.6 ${SANS}`, color: SUB, marginTop: 6 }}>{finalState.reason}</p>
             </div>
           )}
 
-          {state?.stage === "negotiating" && (
+          {settled && finalState?.stage === "negotiating" && (
             <div style={{ marginTop: 24, padding: "16px 0", borderTop: `1px solid ${LINE}` }}>
               <div style={{ font: `600 14px ${SANS}`, color: INK }}>Counteroffer sent</div>
-              {state.counterofferTerms && (
+              {finalState.counterofferTerms && (
                 <div style={{ display: "flex", gap: 32, marginTop: 12, flexWrap: "wrap" }}>
                   <div>
                     <div style={label}>Payment terms</div>
-                    <div style={{ font: `400 15px ${SANS}`, marginTop: 6, color: INK }}>{state.counterofferTerms.paymentTerms}</div>
+                    <div style={{ font: `400 15px ${SANS}`, marginTop: 6, color: INK }}>{finalState.counterofferTerms.paymentTerms}</div>
                   </div>
                   <div>
                     <div style={label}>Total value</div>
-                    <div style={{ font: `500 15px ${MONO}`, marginTop: 6, color: INK }}>{formatMinor(state.counterofferTerms.totalValueMinor)}</div>
+                    <div style={{ font: `500 15px ${MONO}`, marginTop: 6, color: INK }}>{formatMinor(finalState.counterofferTerms.totalValueMinor)}</div>
                   </div>
                 </div>
               )}
