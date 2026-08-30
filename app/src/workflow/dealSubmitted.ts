@@ -5,7 +5,7 @@ import { transitionCase } from "@/state/transitions";
 import { emitCaseEvent } from "./events";
 import { runRoleAgent } from "@/roles/roleRuntime";
 import { calculateDealEconomics, SKU_UNIT_COST_MINOR } from "@/policy/economics";
-import { prepareCommitCertificate, abortCommitment } from "@/reservations/coordinator";
+import { prepareCommitCertificate, abortCommitment, releaseReservations } from "@/reservations/coordinator";
 import { createCounteroffer } from "./counteroffer";
 import { fromJsonColumn } from "@/lib/json-column";
 
@@ -77,10 +77,20 @@ export async function evaluateAndRoute(db: PrismaClient, gateway: ModelGateway, 
     logisticsDecision: { decision: logisticsDecision.decision, evidenceRefs: logisticsDecision.evidenceRefs },
   });
 
-  const heldReservations = await db.reservation.findMany({ where: { caseId: input.caseId, caseVersion: dealCase.activeTermsVersion, termsHash: terms.termsHash, status: "held" } });
-  const inventoryHeldQty = heldReservations.filter((r) => r.domain === "inventory").reduce((sum, r) => sum + (r.quantityMinor ?? 0), 0);
+  const allHeldReservations = await db.reservation.findMany({ where: { caseId: input.caseId, caseVersion: dealCase.activeTermsVersion, termsHash: terms.termsHash, status: "held" } });
+  const inventoryHeldQty = allHeldReservations.filter((r) => r.domain === "inventory").reduce((sum, r) => sum + (r.quantityMinor ?? 0), 0);
   const shortfall = terms.quantity - inventoryHeldQty;
   const requiredDomains: ReservationDomain[] = shortfall > 0 ? [...REQUIRED_BASE_DOMAINS, "supplier"] : REQUIRED_BASE_DOMAINS;
+  // Procurement runs concurrently with inventory and decides whether to hold a
+  // supplier option using only {sku, requestedQuantity} — not the shortfall computed
+  // just above — so it can come back with a held supplier reservation even in a run
+  // where inventory alone ends up covering the full requested quantity. Filter to only
+  // the domains actually required before deriving coveredDomains/missingDomains (so an
+  // unneeded hold can never mask a real gap) and before anything is handed to the
+  // certificate; any reservation outside requiredDomains is released below rather than
+  // silently swept into the certificate as an untracked, un-released hold.
+  const heldReservations = allHeldReservations.filter((r) => requiredDomains.includes(r.domain as ReservationDomain));
+  const extraReservations = allHeldReservations.filter((r) => !requiredDomains.includes(r.domain as ReservationDomain));
   const coveredDomains = new Set(heldReservations.map((r) => r.domain));
   const missingDomains = requiredDomains.filter((d) => !coveredDomains.has(d));
 
@@ -93,6 +103,13 @@ export async function evaluateAndRoute(db: PrismaClient, gateway: ModelGateway, 
   }
 
   if (missingDomains.length === 0) {
+    // Any reservation held for a domain not in requiredDomains (e.g. a speculative
+    // supplier hold that inventory's own coverage made unnecessary) must not persist as
+    // an orphaned, un-released hold — release it now, distinct from the reservations
+    // below that are about to be certified and committed.
+    if (extraReservations.length > 0) {
+      await releaseReservations(db, extraReservations);
+    }
     try {
       const certificate = await prepareCommitCertificate(db, { caseId: input.caseId, caseVersion: dealCase.activeTermsVersion, termsHash: terms.termsHash, reservationIds: heldReservations.map((r) => r.id), requiredDomains });
       await transitionCase(db, { caseId: input.caseId, expectedStatus: "evaluating", expectedVersion: dealCase.activeTermsVersion, nextStatus: "prepared" });
@@ -123,6 +140,7 @@ export async function evaluateAndRoute(db: PrismaClient, gateway: ModelGateway, 
   if (!advanceAllowed || terms.paymentTerms === "ADVANCE_30") {
     await abortCommitment(db, { caseId: input.caseId, caseVersion: dealCase.activeTermsVersion });
     await transitionCase(db, { caseId: input.caseId, expectedStatus: "evaluating", expectedVersion: dealCase.activeTermsVersion, nextStatus: "cannot_commit" });
+    await emitCaseEvent(db, { caseId: input.caseId, eventType: "case.cannot_commit", caseVersion: dealCase.activeTermsVersion, actorType: "coordinator", actorRef: "workflow", payload: { reason: "credit_policy_no_permitted_counterterm" }, traceId: input.traceId });
     return { status: "cannot_commit" as const, reason: "credit_policy_no_permitted_counterterm" };
   }
 

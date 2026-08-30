@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { testDb, resetTestDb } from "@/lib/testDb";
 import { runDealSubmitted } from "./dealSubmitted";
 import { seedFixture } from "@/fixtures/seedFixture";
-import { FIXTURE_FEASIBLE_AFTER_ADVANCE } from "@/fixtures/definitions";
+import { FIXTURE_FEASIBLE_AFTER_ADVANCE, type FixtureDefinition } from "@/fixtures/definitions";
 import { FakeModelGateway } from "@/gateway/fakeGateway";
 import type { RoleRunInput } from "@/gateway/modelGateway";
 import type { FakeRoleScript } from "@/gateway/fakeGateway";
 import type { RoleModelOutput } from "@/lib/types";
-import { toJsonColumn } from "@/lib/json-column";
+import { toJsonColumn, fromJsonColumn } from "@/lib/json-column";
 
 const APPROVE = (evidenceRefs: string[], explanation: string): RoleModelOutput => ({ decision: "approve", constraints: [], reservationRequests: [], counterterms: [], evidenceRefs, explanation });
 
@@ -123,5 +123,66 @@ describe("runDealSubmitted", () => {
     // that doesn't actually exist for this customer.
     const v2 = await testDb.termsVersion.findFirst({ where: { caseId: dealCase.id, version: 2 } });
     expect(v2).toBeNull();
+    // Every other cannot_commit branch emits a case.cannot_commit CaseEvent so the
+    // event log stays the evidence-timeline record of why the case stopped (see the
+    // `sequence` doc comment in events.ts) — this branch must too.
+    const cannotCommitEvent = await testDb.caseEvent.findFirst({ where: { caseId: dealCase.id, eventType: "case.cannot_commit" } });
+    expect(cannotCommitEvent).not.toBeNull();
+    expect(fromJsonColumn(cannotCommitEvent!.payload)).toEqual({ reason: "credit_policy_no_permitted_counterterm" });
+  });
+
+  // Procurement runs concurrently with inventory and decides whether to hold a supplier
+  // option using only {sku, requestedQuantity} — not the shortfall the workflow itself
+  // computes afterward — so a real (non-scripted) procurement agent can hold a supplier
+  // reservation in a run where inventory alone actually ends up covering the full
+  // requested quantity. This scripts exactly that: inventory holds the full 350 units
+  // (so requiredDomains excludes "supplier"), but procurement still calls
+  // hold_supplier_option regardless.
+  function scriptWithUnneededSupplierHold(): FakeRoleScript {
+    return (input: RoleRunInput) => {
+      switch (input.role) {
+        case "sales":
+          return { toolCall: null, output: APPROVE(["EVID-SALES"], "Normalized buyer request.") };
+        case "finance":
+          return { toolCall: { name: "hold_credit_envelope", args: { exposureMinor: 102_900_000, ttlSeconds: 900 } }, output: APPROVE(["EVID-FIN"], "Advance payment keeps exposure within policy.") };
+        case "inventory":
+          return { toolCall: { name: "hold_inventory", args: { warehouseId: "WH-BLR", quantity: 350, ttlSeconds: 900 } }, output: APPROVE(["EVID-INV"], "Full 350 units available from WH-BLR.") };
+        case "procurement":
+          return {
+            toolCall: { name: "hold_supplier_option", args: { supplierId: "VEND-2003", quantity: 151, maxUnitCostMinor: 300_000, maxLeadDays: 21, ttlSeconds: 900 } },
+            output: APPROVE(["EVID-PROC"], "VEND-2003 option held as a hedge, without knowing inventory already covers the request."),
+          };
+        case "logistics":
+          return { toolCall: { name: "hold_delivery_slot", args: { planId: "RT-BLR-HYD", quantity: 350, ttlSeconds: 900 } }, output: APPROVE(["EVID-LOG"], "Full shipment meets the 21-day deadline.") };
+        case "risk":
+        default:
+          return { toolCall: null, output: APPROVE(["EVID-RISK"], "Evidence is fresh and coverage matches decisions.") };
+      }
+    };
+  }
+
+  it("excludes an unneeded held supplier reservation from the certificate and releases it, when inventory alone covers the full quantity", async () => {
+    const fixture: FixtureDefinition = {
+      ...FIXTURE_FEASIBLE_AFTER_ADVANCE,
+      fixtureId: "CASE-INVENTORY-COVERS-FULL-QUANTITY",
+      companyName: "Acme Distribution — Inventory Covers Full Quantity",
+      inventory: [{ sku: "MAT-10001", warehouseId: "WH-BLR", availableQuantity: 350 }],
+    };
+    const { dealCase } = await seedFixture(testDb, fixture);
+    await testDb.termsVersion.update({ where: { caseId_version: { caseId: dealCase.id, version: 1 } }, data: { paymentTerms: "ADVANCE_30" } });
+    const gateway = new FakeModelGateway(scriptWithUnneededSupplierHold());
+
+    const result = await runDealSubmitted(testDb, gateway, { caseId: dealCase.id, modelId: "fake-model-v1", timeoutMs: 2000, traceId: "trace-1", buyerLinkSigningSecret: "test-secret" });
+
+    expect(result.status).toBe("prepared");
+    if (result.status !== "prepared") throw new Error("expected prepared");
+
+    const supplierReservation = await testDb.reservation.findFirstOrThrow({ where: { caseId: dealCase.id, domain: "supplier" } });
+    const certificate = await testDb.commitCertificate.findUniqueOrThrow({ where: { id: result.certificateId } });
+    const certifiedReservationIds = fromJsonColumn<string[]>(certificate.reservationIds);
+
+    expect(certifiedReservationIds).not.toContain(supplierReservation.id);
+    const reloadedSupplierReservation = await testDb.reservation.findUniqueOrThrow({ where: { id: supplierReservation.id } });
+    expect(reloadedSupplierReservation.status).toBe("released");
   });
 });

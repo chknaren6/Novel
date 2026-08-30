@@ -246,14 +246,17 @@ export type AbortCommitmentResult =
   | { reservationId: string; status: "released"; reservation: unknown }
   | { reservationId: string; status: "failed"; error: unknown };
 
-// Releases every still-held reservation for a preparation attempt. Repeated calls
-// return existing release results — each release function is itself a no-op once a
-// reservation is no longer `held` (05-TOOL-CONTRACTS.md "abort_commitment"). A release
-// that throws is caught per-item rather than aborting the loop: the caller needs to
-// know which reservations were actually released even when one release fails, not lose
-// that information to an unhandled rejection that discards every result gathered so far.
-export async function abortCommitment(db: PrismaClient, input: { caseId: string; caseVersion: number }): Promise<AbortCommitmentResult[]> {
-  const reservations = await db.reservation.findMany({ where: { caseId: input.caseId, caseVersion: input.caseVersion, status: "held" } });
+// Releases each given reservation via its domain-specific adapter. Repeated calls
+// return the same outcome — each release function is itself a no-op once a reservation
+// is no longer `held` (05-TOOL-CONTRACTS.md "abort_commitment"). A release that throws
+// is caught per-item rather than aborting the loop: the caller needs to know which
+// reservations were actually released even when one release fails, not lose that
+// information to an unhandled rejection that discards every result gathered so far.
+// Shared by abortCommitment below (which releases every held reservation for a
+// case/version wholesale) and by evaluateAndRoute's certificate-preparation path in
+// dealSubmitted.ts (which must release only the specific reservations that turned out
+// not to be required, without touching the reservations about to be committed).
+export async function releaseReservations(db: PrismaClient, reservations: Array<{ id: string; domain: string }>): Promise<AbortCommitmentResult[]> {
   const results: AbortCommitmentResult[] = [];
   for (const reservation of reservations) {
     try {
@@ -280,6 +283,14 @@ export async function abortCommitment(db: PrismaClient, input: { caseId: string;
     }
   }
   return results;
+}
+
+// Releases every still-held reservation for a preparation attempt (all domains, for one
+// case/version) — see releaseReservations above for the per-reservation release logic
+// and its idempotency/error-handling notes.
+export async function abortCommitment(db: PrismaClient, input: { caseId: string; caseVersion: number }): Promise<AbortCommitmentResult[]> {
+  const reservations = await db.reservation.findMany({ where: { caseId: input.caseId, caseVersion: input.caseVersion, status: "held" } });
+  return releaseReservations(db, reservations);
 }
 
 // Requires a persisted disruption event and consumed certificate; marks the
