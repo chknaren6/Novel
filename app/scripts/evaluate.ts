@@ -225,11 +225,12 @@ caveat as above: a real-world fulfillment KPI, not the same measurement.
 
 **Definition:** over every individual recorded role-turn across all runs that has a
 canonical expected tool call defined for it (src/fixtures/canonicalTrajectories.ts),
-the fraction whose actual tool name and resource-identifying argument exactly match
-canonical. Turns with no canonical tool call expected (sales/risk, which never call a
-mutation tool; finance, whose only tool arguments — exposureMinor/ttlSeconds — are
-policy parameters with no resource identity to check) are excluded from both numerator
-and denominator.
+the fraction whose actual tool call matches canonical. Most roles are checked on tool
+name AND resource-identifying argument; finance's \`hold_credit_envelope\` is checked on
+tool name only, since its only arguments — exposureMinor/ttlSeconds — are policy
+parameters with no resource identity to compare. Turns with no canonical tool call
+expected at all (sales/risk, which never call a mutation tool in any stage) are
+excluded from both numerator and denominator.
 
 **Measured:** ${pct(overallToolAccuracy)} overall.
 
