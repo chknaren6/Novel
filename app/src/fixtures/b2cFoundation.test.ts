@@ -66,4 +66,13 @@ describe("B2C foundation schema additions", () => {
     expect(withFreshness.freshnessTier).toBe("tier2");
     expect(withFreshness.lastVerifiedAt).toBeInstanceOf(Date);
   });
+
+  it("defaults DealCase.channel to 'b2b' and allows 'b2c'", async () => {
+    const company = await testDb.company.create({ data: { name: "Acme" } });
+    const buyer = await testDb.marketplaceBuyer.create({ data: { name: "Ramesh Traders", phone: "+91-90000-00000" } });
+    const b2b = await testDb.dealCase.create({ data: { companyId: company.id, customerId: buyer.id, activeTermsVersion: 1, status: "intake", createdBy: "seed" } });
+    expect(b2b.channel).toBe("b2b");
+    const b2c = await testDb.dealCase.create({ data: { companyId: company.id, customerId: buyer.id, channel: "b2c", activeTermsVersion: 1, status: "intake", createdBy: "seed" } });
+    expect(b2c.channel).toBe("b2c");
+  });
 });

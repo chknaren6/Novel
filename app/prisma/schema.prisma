@@ -89,6 +89,9 @@ model DealCase {
   company            Company             @relation(fields: [companyId], references: [id])
   customerId         String
   fixtureId          String?
+  // "b2b" (default, every existing row) or "b2c". Lets a query or dashboard tell the
+  // two apart without inferring it from which table customerId happens to point at.
+  channel            String              @default("b2b")
   activeTermsVersion Int
   status             String
   createdBy          String
