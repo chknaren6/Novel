@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { INK, SUB, MUTE, LINE, SANS, SERIF, MONO } from "@/app/market/styles";
+import { NavBar } from "@/app/NavBar";
 import { DeskCase } from "./DeskCase";
 
 type CaseSummary = {
@@ -48,21 +49,26 @@ export default function DeskPage() {
 
   if (selected) {
     return (
-      <DeskCase
-        caseId={selected.caseId}
-        customerName={selected.customerName}
-        companyName={selected.companyName}
-        sku={selected.sku}
-        quantity={selected.quantity}
-        totalValueMinor={selected.totalValueMinor}
-        paymentTerms={selected.paymentTerms}
-        onBack={() => setSelectedCaseId(null)}
-      />
+      <>
+        <NavBar />
+        <DeskCase
+          caseId={selected.caseId}
+          customerName={selected.customerName}
+          companyName={selected.companyName}
+          sku={selected.sku}
+          quantity={selected.quantity}
+          totalValueMinor={selected.totalValueMinor}
+          paymentTerms={selected.paymentTerms}
+          onBack={() => setSelectedCaseId(null)}
+        />
+      </>
     );
   }
 
   return (
-    <div style={{ maxWidth: 760, margin: "0 auto", padding: "42px 40px" }}>
+    <>
+      <NavBar />
+      <div style={{ maxWidth: 760, margin: "0 auto", padding: "42px 40px" }}>
       <h2 style={{ font: `500 34px/1.2 ${SERIF}`, letterSpacing: "-.012em", margin: 0, color: INK }}>Commitment Desk</h2>
       <p style={{ font: `400 16.5px/1.75 ${SANS}`, color: SUB, margin: "14px 0 0" }}>
         Pending B2B cases waiting for evaluation. Run each through the six-role check to commit, counter, or escalate.
@@ -106,6 +112,7 @@ export default function DeskPage() {
           ))}
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }
