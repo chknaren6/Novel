@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { testDb, resetTestDb } from "@/lib/testDb";
 import { getBuyerOffer } from "./buyerService";
 import { createCounteroffer } from "@/workflow/counteroffer";
@@ -46,5 +46,18 @@ describe("getBuyerOffer", () => {
 
   it("returns null for a malformed token without throwing", async () => {
     await expect(getBuyerOffer(testDb, "not-a-real-token", SECRET)).resolves.toBeNull();
+  });
+
+  it("rethrows (and logs) a genuine DB failure instead of masking it as null", async () => {
+    const { buyerToken } = await seedOffer();
+    const dbError = new Error("connection reset");
+    const findUniqueSpy = vi.spyOn(testDb.counteroffer, "findUnique").mockRejectedValueOnce(dbError);
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(getBuyerOffer(testDb, buyerToken, SECRET)).rejects.toThrow("connection reset");
+    expect(consoleErrorSpy).toHaveBeenCalled();
+
+    findUniqueSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
   });
 });
