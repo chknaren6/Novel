@@ -61,6 +61,33 @@ describe("generateNegotiationBrief", () => {
     expect(brief.historicalPricing).toEqual([{ unitCostMinor: 88_00, confirmedAt: expect.any(String) }]);
   });
 
+  it("returns multiple historical price points when the supplier+sku has several prior confirmed orders", async () => {
+    const company = await testDb.company.create({ data: { name: "CommitOS" } });
+    const buyer = await testDb.marketplaceBuyer.create({ data: { name: "Old Buyer", phone: "+91-90000-00098" } });
+
+    const caseA = await testDb.dealCase.create({ data: { companyId: company.id, customerId: buyer.id, channel: "b2c", activeTermsVersion: 1, status: "committed", createdBy: "test" } });
+    await testDb.termsVersion.create({ data: { caseId: caseA.id, version: 1, source: "buyer_request", termsHash: "hash-a", sku: "SKU-MULTI", quantity: 5, totalValueMinor: 100_00, discountBps: 0, paymentTerms: "ADVANCE_VARIABLE", deliveryDeadline: new Date(), confirmedBuyPriceMinor: 80_00 } });
+    await testDb.reservation.create({ data: { caseId: caseA.id, caseVersion: 1, termsHash: "hash-a", domain: "supplier", resourceRef: "SUPPLIER:VEND-A:SKU-MULTI", status: "committed", policyVersion: "supplier-policy-v1", expiresAt: new Date(Date.now() + 100_000), idempotencyKey: "multi-a" } });
+
+    const caseB = await testDb.dealCase.create({ data: { companyId: company.id, customerId: buyer.id, channel: "b2c", activeTermsVersion: 1, status: "committed", createdBy: "test" } });
+    await testDb.termsVersion.create({ data: { caseId: caseB.id, version: 1, source: "buyer_request", termsHash: "hash-b", sku: "SKU-MULTI", quantity: 8, totalValueMinor: 150_00, discountBps: 0, paymentTerms: "ADVANCE_VARIABLE", deliveryDeadline: new Date(), confirmedBuyPriceMinor: 82_00 } });
+    await testDb.reservation.create({ data: { caseId: caseB.id, caseVersion: 1, termsHash: "hash-b", domain: "supplier", resourceRef: "SUPPLIER:VEND-A:SKU-MULTI", status: "committed", policyVersion: "supplier-policy-v1", expiresAt: new Date(Date.now() + 100_000), idempotencyKey: "multi-b" } });
+
+    // A third reservation with no confirmed price yet — must NOT appear in the result.
+    const caseC = await testDb.dealCase.create({ data: { companyId: company.id, customerId: buyer.id, channel: "b2c", activeTermsVersion: 1, status: "evaluating", createdBy: "test" } });
+    await testDb.termsVersion.create({ data: { caseId: caseC.id, version: 1, source: "buyer_request", termsHash: "hash-c", sku: "SKU-MULTI", quantity: 3, totalValueMinor: 60_00, discountBps: 0, paymentTerms: "ADVANCE_VARIABLE", deliveryDeadline: new Date(), confirmedBuyPriceMinor: null } });
+    await testDb.reservation.create({ data: { caseId: caseC.id, caseVersion: 1, termsHash: "hash-c", domain: "supplier", resourceRef: "SUPPLIER:VEND-A:SKU-MULTI", status: "held", policyVersion: "supplier-policy-v1", expiresAt: new Date(Date.now() + 100_000), idempotencyKey: "multi-c" } });
+
+    const client = fakeClient([{ choices: [{ message: { content: JSON.stringify(LLM_REPLY) } }] }]);
+    const brief = await generateNegotiationBrief(testDb, client, "gpt-5-nano", 30_000, {
+      sku: "SKU-MULTI", itemDescription: "widget", quantity: 5,
+      deliveryDeadline: "2026-09-15", chosenSupplierId: "VEND-A", chosenListedUnitCostMinor: 100_00,
+      otherCandidates: [],
+    });
+    expect(brief.historicalPricing).toHaveLength(2);
+    expect(brief.historicalPricing!.map((h) => h.unitCostMinor).sort()).toEqual([80_00, 82_00]);
+  });
+
   it("wraps a network failure as ToolError PROVIDER_UNAVAILABLE", async () => {
     const create = vi.fn().mockRejectedValue(new Error("network down"));
     const client = { chat: { completions: { create } } } as unknown as OpenAI;

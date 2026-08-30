@@ -62,16 +62,18 @@ async function findHistoricalPricing(
   });
   if (priorReservations.length === 0) return null;
 
-  const history: { unitCostMinor: number; confirmedAt: string }[] = [];
-  for (const reservation of priorReservations) {
-    const terms = await db.termsVersion.findFirst({
-      where: { caseId: reservation.caseId, version: reservation.caseVersion, confirmedBuyPriceMinor: { not: null } },
-    });
-    if (terms?.confirmedBuyPriceMinor != null) {
-      history.push({ unitCostMinor: terms.confirmedBuyPriceMinor, confirmedAt: terms.createdAt.toISOString() });
-    }
-  }
-  return history.length > 0 ? history : null;
+  // Single query instead of one findFirst per reservation: TermsVersion's
+  // @@unique([caseId, version]) means each {caseId, caseVersion} pair from the
+  // reservations above identifies at most one row, so an OR of those pairs (plus the
+  // confirmed-price filter) covers exactly the same rows the per-reservation loop did.
+  const priorTerms = await db.termsVersion.findMany({
+    where: {
+      confirmedBuyPriceMinor: { not: null },
+      OR: priorReservations.map((r) => ({ caseId: r.caseId, version: r.caseVersion })),
+    },
+  });
+  if (priorTerms.length === 0) return null;
+  return priorTerms.map((t) => ({ unitCostMinor: t.confirmedBuyPriceMinor!, confirmedAt: t.createdAt.toISOString() }));
 }
 
 // Prepares the brief a human negotiator reviews before contacting a supplier
