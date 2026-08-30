@@ -57,4 +57,20 @@ describe("deriveMarketState", () => {
     expect(state.stage).toBe("escalated");
     expect(state.reason).toBe("Unknown reason");
   });
+
+  it("is escalated (rolling back) when a commit attempt is actively being aborted, distinct from a fully escalated case", () => {
+    const state = deriveMarketState({ status: "aborting" }, [], 1_325_000);
+    expect(state.stage).toBe("escalated");
+    expect(state.reason).toBe("Rolling back after a failed commit attempt.");
+  });
+
+  it("documents the known crash-window limitation: a prepared case with no case.prepared event yet still reads as awaiting_buyer_response", () => {
+    // Mirrors the same gap buyerResponse.ts's accepted-replay branch already documents:
+    // transitionCase(...->"prepared") and emitCaseEvent(case.prepared) are two separate
+    // non-transactional statements, so a crash between them leaves this exact
+    // combination. Locking in current (imprecise but not incorrect-looking) behavior
+    // rather than leaving it untested.
+    const state = deriveMarketState({ status: "prepared" }, [], 1_325_000);
+    expect(state.stage).toBe("awaiting_buyer_response");
+  });
 });

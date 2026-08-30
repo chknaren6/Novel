@@ -1,4 +1,5 @@
 import { fromJsonColumn } from "@/lib/json-column";
+import type { CaseStatus } from "@/lib/types";
 
 export type MarketStage = "awaiting_buyer_response" | "preparing" | "committed" | "declined" | "escalated";
 
@@ -23,7 +24,7 @@ const STAGE_LABELS: Record<MarketStage, string> = {
 // the mockup's raw 0-7 numbers: the real state machine doesn't partition into 8 equal
 // buckets (escalated, in particular, isn't on the original happy-path spectrum at all).
 export function deriveMarketState(
-  dealCase: { status: string },
+  dealCase: { status: CaseStatus },
   events: { eventType: string; payload: string }[],
   termsTotalValueMinor: number | null,
 ): MarketViewState {
@@ -35,6 +36,9 @@ export function deriveMarketState(
     const reason = escalatedEvent ? (fromJsonColumn<{ reason?: string }>(escalatedEvent.payload).reason ?? "Unknown reason") : "Unknown reason";
     return { stage: "escalated", label: STAGE_LABELS.escalated, certificateReady: false, sellPriceMinor: null, reason };
   }
+  if (dealCase.status === "aborting") {
+    return { stage: "escalated", label: STAGE_LABELS.escalated, certificateReady: false, sellPriceMinor: null, reason: "Rolling back after a failed commit attempt." };
+  }
   if (dealCase.status === "cannot_commit") {
     return { stage: "declined", label: STAGE_LABELS.declined, certificateReady: false, sellPriceMinor: null, reason: null };
   }
@@ -42,5 +46,13 @@ export function deriveMarketState(
   if (eventTypes.has("case.prepared")) {
     return { stage: "preparing", label: STAGE_LABELS.preparing, certificateReady: false, sellPriceMinor: termsTotalValueMinor, reason: null };
   }
+  // Reached by "intake" (a case that hasn't even been fully created yet — not
+  // observable in practice, createB2CCase creates the row and the terms in one
+  // transaction-adjacent sequence), "prepared"/"committing" before their case.prepared
+  // event lands (buyerResponse.ts's own documented crash-window limitation — see its
+  // comment above the accepted-replay branch), and "negotiating" (B2B-only, never
+  // reachable for a B2C case). All fall back to the same "still in progress" label,
+  // which is honest for "committing" and merely imprecise (not wrong) for the other two
+  // rare/unreachable cases.
   return { stage: "awaiting_buyer_response", label: STAGE_LABELS.awaiting_buyer_response, certificateReady: false, sellPriceMinor: termsTotalValueMinor, reason: null };
 }
