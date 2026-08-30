@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import type { DealTerms, Evidence, PaymentTerms } from "@/lib/types";
+import { ToolError } from "@/lib/types";
 import { newId } from "@/lib/ids";
 import { fromJsonColumn } from "@/lib/json-column";
 
@@ -7,16 +8,35 @@ function evidenceEnvelope<T>(source: string, data: T): Evidence<T> {
   return { evidenceId: newId("EVID"), observedAt: new Date().toISOString(), source, data };
 }
 
+// NOTE: None of the values read out below go through runtime schema validation
+// before being returned as tool results, even though 05-TOOL-CONTRACTS.md describes
+// tool results as "typed and schema-validated". The cast-based narrowing seen here
+// (e.g. `paymentTerms as PaymentTerms`, `currency as "INR"`, the untyped `status`
+// field) trusts DB values as-is for this P0 build's fixed-fixture scope. Full runtime
+// validation is a deferred follow-up, not fixed in this pass.
+
 export async function getDealContext(db: PrismaClient, caseId: string) {
-  const dealCase = await db.dealCase.findUniqueOrThrow({ where: { id: caseId } });
-  const terms = await db.termsVersion.findFirstOrThrow({ where: { caseId, version: dealCase.activeTermsVersion } });
+  const dealCase = await db.dealCase.findUnique({ where: { id: caseId } });
+  if (!dealCase) {
+    throw new ToolError("RESOURCE_UNAVAILABLE", `Case ${caseId} not found`, false);
+  }
+  const terms = await db.termsVersion.findUnique({
+    where: { caseId_version: { caseId, version: dealCase.activeTermsVersion } },
+  });
+  if (!terms) {
+    throw new ToolError(
+      "RESOURCE_UNAVAILABLE",
+      `No terms version ${dealCase.activeTermsVersion} found for case ${caseId}`,
+      false,
+    );
+  }
   return evidenceEnvelope("deal_case", {
     customerId: dealCase.customerId,
     strategicTier: "standard" as const,
     currentTerms: {
       sku: terms.sku,
       quantity: terms.quantity,
-      currency: "INR" as const,
+      currency: terms.currency as "INR",
       totalValueMinor: terms.totalValueMinor,
       discountBps: terms.discountBps,
       paymentTerms: terms.paymentTerms as PaymentTerms,
@@ -27,7 +47,10 @@ export async function getDealContext(db: PrismaClient, caseId: string) {
 }
 
 export async function getCustomerCredit(db: PrismaClient, customerId: string) {
-  const customer = await db.customer.findUniqueOrThrow({ where: { id: customerId } });
+  const customer = await db.customer.findUnique({ where: { id: customerId } });
+  if (!customer) {
+    throw new ToolError("RESOURCE_UNAVAILABLE", `Customer ${customerId} not found`, false);
+  }
   return evidenceEnvelope("customer", {
     creditLimitMinor: customer.creditLimitMinor,
     currentExposureMinor: customer.currentExposureMinor,
@@ -46,6 +69,11 @@ export async function getInventoryPositions(db: PrismaClient, sku: string) {
   });
 }
 
+// NOTE: This returns every supplier option for the SKU, without narrowing by the
+// additional parameters (requiredQuantity, backedOrigins, deadline) that
+// 05-TOOL-CONTRACTS.md describes for this tool. Deferred until a caller (role
+// runtime / tool registry, a later task) actually needs and can supply those
+// parameters — not a silent oversight.
 export async function getSupplierOptions(db: PrismaClient, sku: string) {
   const options = await db.supplierOption.findMany({ where: { sku } });
   return evidenceEnvelope("supplier_option", {
@@ -53,6 +81,11 @@ export async function getSupplierOptions(db: PrismaClient, sku: string) {
   });
 }
 
+// NOTE: This returns every delivery plan for the destination, without narrowing by
+// the additional parameters (requiredQuantity, backedOrigins, deadline) that
+// 05-TOOL-CONTRACTS.md describes for this tool. Deferred until a caller (role
+// runtime / tool registry, a later task) actually needs and can supply those
+// parameters — not a silent oversight.
 export async function getDeliveryOptions(db: PrismaClient, destinationId: string) {
   const plans = await db.deliveryPlanOption.findMany({ where: { destinationId } });
   return evidenceEnvelope("delivery_plan_option", {

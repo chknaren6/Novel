@@ -14,6 +14,24 @@ describe("isReadToolAllowed", () => {
     expect(isReadToolAllowed("risk", "get_inventory_positions")).toBe(true);
     expect(isReadToolAllowed("procurement", "get_inventory_positions")).toBe(false);
   });
+
+  it("allows Finance and Risk to read customer credit, and no one else", () => {
+    expect(isReadToolAllowed("finance", "get_customer_credit")).toBe(true);
+    expect(isReadToolAllowed("risk", "get_customer_credit")).toBe(true);
+    expect(isReadToolAllowed("sales", "get_customer_credit")).toBe(false);
+  });
+
+  it("allows Procurement and Risk to read supplier options, and no one else", () => {
+    expect(isReadToolAllowed("procurement", "get_supplier_options")).toBe(true);
+    expect(isReadToolAllowed("risk", "get_supplier_options")).toBe(true);
+    expect(isReadToolAllowed("sales", "get_supplier_options")).toBe(false);
+  });
+
+  it("allows Logistics and Risk to read delivery options, and no one else", () => {
+    expect(isReadToolAllowed("logistics", "get_delivery_options")).toBe(true);
+    expect(isReadToolAllowed("risk", "get_delivery_options")).toBe(true);
+    expect(isReadToolAllowed("sales", "get_delivery_options")).toBe(false);
+  });
 });
 
 describe("MUTATION_TOOL_BY_ROLE", () => {

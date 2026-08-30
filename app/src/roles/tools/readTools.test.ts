@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { testDb, resetTestDb } from "@/lib/testDb";
 import { toJsonColumn } from "@/lib/json-column";
+import { ToolError } from "@/lib/types";
 import { getDealContext, getCustomerCredit, getInventoryPositions, getSupplierOptions, getDeliveryOptions } from "./readTools";
 
 describe("readTools", () => {
@@ -22,6 +23,11 @@ describe("readTools", () => {
     const customer = await testDb.customer.create({ data: { companyId: company.id, name: "Beacon", creditLimitMinor: 200_000_000, currentExposureMinor: 0, overdueReceivablesMinor: 0, allowedPaymentTerms: toJsonColumn(["ADVANCE_30"]), policyVersion: "credit-policy-v1" } });
     const evidence = await getCustomerCredit(testDb, customer.id);
     expect(evidence.data.creditLimitMinor).toBe(200_000_000);
+    expect(evidence.data.allowedPaymentTerms).toEqual(["ADVANCE_30"]);
+  });
+
+  it("getCustomerCredit throws a ToolError when the customer does not exist", async () => {
+    await expect(getCustomerCredit(testDb, "CUST-DOES-NOT-EXIST")).rejects.toThrow(ToolError);
   });
 
   it("getInventoryPositions returns every warehouse position for the SKU", async () => {
