@@ -10,6 +10,7 @@ import {
   recoverySuccessRate,
   type RunRecord,
 } from "./metrics";
+import { ALL_CANONICAL_TRAJECTORIES, TRAJECTORY_FEASIBLE_AFTER_ADVANCE } from "./canonicalTrajectories";
 import type { CanonicalTrajectory } from "./canonicalTrajectories";
 import type { RecordedRoleCall } from "@/gateway/recordingGateway";
 
@@ -184,6 +185,57 @@ describe("trajectoryMatchRate", () => {
       }),
     ];
     expect(trajectoryMatchRate(runs, [TEST_TRAJECTORY])).toBe(0);
+  });
+
+  // A full, otherwise-correct CASE-FEASIBLE-AFTER-ADVANCE trajectory (12 role-turns:
+  // sales/finance/inventory/procurement/logistics/risk on the negotiating pass, then
+  // the same six roles again on the ADVANCE_30 pass), built to mirror
+  // evaluationScripts.ts's real scripted shape exactly. Individual tests below mutate
+  // one entry at a time to prove a specific gap is now caught.
+  function fullyCorrectFeasibleTrajectory(): RecordedRoleCall[] {
+    return [
+      // Negotiating pass (NEGOTIATING_STAGES).
+      call("sales", null, null),
+      call("finance", null, null), // NET_60 -> counters, no tool call.
+      call("inventory", "hold_inventory", { warehouseId: "WH-BLR", quantity: 199, ttlSeconds: 900 }),
+      call("procurement", "hold_supplier_option", { supplierId: "VEND-2003", quantity: 151, ttlSeconds: 900 }),
+      call("logistics", "hold_delivery_slot", { planId: "RT-BLR-HYD", quantity: 350, ttlSeconds: 900 }),
+      call("risk", null, null),
+      // ADVANCE_30 re-evaluation pass (ADVANCE_EVALUATION_STAGES).
+      call("sales", null, null),
+      call("finance", "hold_credit_envelope", { exposureMinor: 102_900_000, ttlSeconds: 900 }),
+      call("inventory", "hold_inventory", { warehouseId: "WH-BLR", quantity: 199, ttlSeconds: 900 }),
+      call("procurement", "hold_supplier_option", { supplierId: "VEND-2003", quantity: 151, ttlSeconds: 900 }),
+      call("logistics", "hold_delivery_slot", { planId: "RT-BLR-HYD", quantity: 350, ttlSeconds: 900 }),
+      call("risk", null, null),
+    ];
+  }
+
+  it("is 1.0 for the real CASE-FEASIBLE-AFTER-ADVANCE canonical trajectory when the recorded run is fully correct", () => {
+    const runs: RunRecord[] = [baseRun({ trajectory: fullyCorrectFeasibleTrajectory() })];
+    expect(trajectoryMatchRate(runs, ALL_CANONICAL_TRAJECTORIES)).toBe(1);
+  });
+
+  it("catches an unexpected/wrong call from inventory/procurement/logistics during the negotiating stage (previously an entry-less, silently-unchecked stage)", () => {
+    const trajectory = fullyCorrectFeasibleTrajectory();
+    // Corrupt inventory's negotiating-stage hold (index 2) to a wrong warehouse. Before
+    // this fix, NEGOTIATING_STAGES' middle stage had expectedToolCalls: {}, so this
+    // would have been silently unchecked and trajectoryMatchRate would still read 1.0.
+    trajectory[2] = call("inventory", "hold_inventory", { warehouseId: "WH-WRONG", quantity: 199, ttlSeconds: 900 });
+    const runs: RunRecord[] = [baseRun({ trajectory })];
+    expect(trajectoryMatchRate(runs, [TRAJECTORY_FEASIBLE_AFTER_ADVANCE])).toBe(0);
+  });
+
+  it("catches finance making an unauthorized/bogus-named tool call during ADVANCE_30 (previously an entry-less role, silently unchecked because hold_credit_envelope has no identity arg)", () => {
+    const trajectory = fullyCorrectFeasibleTrajectory();
+    // Replace finance's ADVANCE_30 call (index 7) with a completely bogus tool name.
+    // Before this fix, finance had no expectedToolCalls entry at ADVANCE_30 at all (its
+    // real call, hold_credit_envelope, has no resource-identity arg to check), so any
+    // call it made here — including this unauthorized one — was silently unchecked and
+    // trajectoryMatchRate would still read 1.0.
+    trajectory[7] = call("finance", "issue_unauthorized_wire_transfer", { exposureMinor: 102_900_000, ttlSeconds: 900 });
+    const runs: RunRecord[] = [baseRun({ trajectory })];
+    expect(trajectoryMatchRate(runs, [TRAJECTORY_FEASIBLE_AFTER_ADVANCE])).toBe(0);
   });
 });
 

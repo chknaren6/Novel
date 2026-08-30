@@ -2,14 +2,29 @@ import type { RoleId } from "@/lib/types";
 
 // A canonical expected trajectory for one fixture: the ordered stages evaluateAndRoute
 // (src/workflow/dealSubmitted.ts) and, where applicable, runSupplierDisruption
-// (src/workflow/supplierDisrupted.ts) actually run, and — for any role in a stage that
-// is expected to issue a mutation tool call — the exact tool name plus the ONE
-// resource-identifying argument to check (e.g. supplierId/warehouseId/planId). Policy
-// parameters like ttlSeconds/quantity/maxUnitCostMinor/maxLeadDays/exposureMinor are
-// deliberately excluded from the match — they are not identity.
+// (src/workflow/supplierDisrupted.ts) actually run, and, per role per stage, exactly
+// one of three states:
+//   1. Full check: an entry with `resourceArgKey` — the role must call `name` with
+//      `resourceArgValue` at that key. Used whenever the tool call carries a
+//      resource-identifying argument (e.g. supplierId/warehouseId/planId).
+//   2. Name-only check: an entry with no `resourceArgKey` — the role must call `name`,
+//      but none of its args are checked. Used for tools like hold_credit_envelope whose
+//      only args (exposureMinor/ttlSeconds) are policy parameters, not a
+//      resource-identifying value, so there is nothing honest to assert beyond the
+//      call happening at all.
+//   3. No entry at all — the role is expected to make no tool call whatsoever in this
+//      stage; any actual call is a mismatch (exceeding its authority).
+// Policy parameters like ttlSeconds/quantity/maxUnitCostMinor/maxLeadDays/exposureMinor
+// are never part of a check — they are not identity.
+export interface ExpectedToolCall {
+  name: string;
+  resourceArgKey?: string;
+  resourceArgValue?: unknown;
+}
+
 export interface CanonicalStage {
   roles: RoleId[];
-  expectedToolCalls: Partial<Record<RoleId, { name: string; resourceArgKey: string; resourceArgValue: unknown }>>;
+  expectedToolCalls: Partial<Record<RoleId, ExpectedToolCall>>;
 }
 
 export interface CanonicalTrajectory {
@@ -21,24 +36,39 @@ export interface CanonicalTrajectory {
 // INITIAL_TERMS): Finance always counters on the first evaluateAndRoute pass with no
 // tool call (a "counter" decision short-circuits straight to negotiating, per
 // dealSubmitted.ts — no reservation is ever held on this pass), so this initial
-// "negotiating" stage set is identical and reused across all three fixtures.
+// "negotiating" stage set is identical and reused across all three fixtures. Finance
+// is the only role of the four in this stage's role-set that makes no tool call here
+// (it counters instead) — Inventory/Procurement/Logistics still run concurrently with
+// it, unconditionally, per evaluateAndRoute (src/workflow/dealSubmitted.ts), and hold
+// the exact same resources as they do on the ADVANCE_30 pass below (terms.quantity is
+// 350 across all three fixtures per src/fixtures/definitions.ts, and Logistics only
+// ever branches to a different plan during actual supplier-disruption repair, not
+// during this negotiating pass) — the resulting holds are simply superseded/released
+// once the buyer counters, so they are still real, checkable calls, not merely
+// "unchecked."
 const NEGOTIATING_STAGES: CanonicalStage[] = [
   { roles: ["sales"], expectedToolCalls: {} },
-  // Finance is deliberately omitted from expectedToolCalls even where it approves
-  // and calls hold_credit_envelope elsewhere in this file: hold_credit_envelope's only
-  // args are exposureMinor and ttlSeconds, both policy parameters, not a
-  // resource-identifying value (credit is already scoped to the one customer on the
-  // case via context, unlike a supplier/warehouse/delivery-plan choice) — there is no
-  // honest identity argument to assert on for this tool.
-  { roles: ["finance", "inventory", "procurement", "logistics"], expectedToolCalls: {} },
+  {
+    roles: ["finance", "inventory", "procurement", "logistics"],
+    expectedToolCalls: {
+      inventory: { name: "hold_inventory", resourceArgKey: "warehouseId", resourceArgValue: "WH-BLR" },
+      procurement: { name: "hold_supplier_option", resourceArgKey: "supplierId", resourceArgValue: "VEND-2003" },
+      logistics: { name: "hold_delivery_slot", resourceArgKey: "planId", resourceArgValue: "RT-BLR-HYD" },
+    },
+  },
   { roles: ["risk"], expectedToolCalls: {} },
 ];
 
 // After the buyer accepts the 30% advance counteroffer, runBuyerResponse re-runs
-// evaluateAndRoute at ADVANCE_30: Finance now approves and holds credit (no
-// identity arg, see above), Inventory holds its partial 199 units at WH-BLR,
-// Procurement holds the 151-unit shortfall from VEND-2003, Logistics holds the
-// RT-BLR-HYD split-shipment plan, and Risk approves — see
+// evaluateAndRoute at ADVANCE_30: Finance now approves and holds a credit envelope
+// (name-only checked — hold_credit_envelope's only args are exposureMinor and
+// ttlSeconds, both policy parameters, not a resource-identifying value; credit is
+// already scoped to the one customer on the case via context, unlike a
+// supplier/warehouse/delivery-plan choice, so there is no honest identity argument to
+// assert on for this tool, but the call itself is still real and checkable by name),
+// Inventory holds its partial 199 units at WH-BLR, Procurement holds the 151-unit
+// shortfall from VEND-2003, Logistics holds the RT-BLR-HYD split-shipment plan, and
+// Risk approves — see
 // src/workflow/dealSubmitted.test.ts / buyerResponse.test.ts / staleSupplierHold.test.ts
 // for the identical scripted shapes this mirrors.
 const ADVANCE_EVALUATION_STAGES: CanonicalStage[] = [
@@ -46,6 +76,7 @@ const ADVANCE_EVALUATION_STAGES: CanonicalStage[] = [
   {
     roles: ["finance", "inventory", "procurement", "logistics"],
     expectedToolCalls: {
+      finance: { name: "hold_credit_envelope" },
       inventory: { name: "hold_inventory", resourceArgKey: "warehouseId", resourceArgValue: "WH-BLR" },
       procurement: { name: "hold_supplier_option", resourceArgKey: "supplierId", resourceArgValue: "VEND-2003" },
       logistics: { name: "hold_delivery_slot", resourceArgKey: "planId", resourceArgValue: "RT-BLR-HYD" },

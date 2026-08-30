@@ -1,6 +1,6 @@
 import type { CaseStatus, RoleId } from "@/lib/types";
 import type { RecordedRoleCall } from "@/gateway/recordingGateway";
-import type { CanonicalStage, CanonicalTrajectory } from "./canonicalTrajectories";
+import type { CanonicalStage, CanonicalTrajectory, ExpectedToolCall } from "./canonicalTrajectories";
 
 // One evaluation run's outcome, assembled by scripts/evaluate.ts. Pure data — no DB or
 // gateway dependency — so every function below is unit-testable in isolation.
@@ -94,16 +94,23 @@ function alignRunToStages(trajectory: CanonicalTrajectory, calls: RecordedRoleCa
   return { stages, hasLeftoverCalls };
 }
 
-function toolCallMatches(actual: RecordedRoleCall | undefined, expected: { name: string; resourceArgKey: string; resourceArgValue: unknown }): boolean {
+// Checks one recorded call against one CanonicalStage entry. An entry with a
+// `resourceArgKey` requires the actual call's toolCallName AND that one
+// resource-identifying arg value to match (a "full" check); an entry with no
+// `resourceArgKey` (e.g. finance's hold_credit_envelope, whose only args are policy
+// parameters with no resource identity) requires only the toolCallName to match (a
+// "name-only" check).
+function toolCallMatches(actual: RecordedRoleCall | undefined, expected: ExpectedToolCall): boolean {
   if (!actual || actual.toolCallName !== expected.name) return false;
+  if (expected.resourceArgKey === undefined) return true;
   const args = actual.toolArgs as Record<string, unknown> | null;
   return args !== null && typeof args === "object" && args[expected.resourceArgKey] === expected.resourceArgValue;
 }
 
 // Over every individual recorded role-turn across all runs that has a canonical
-// expected tool call defined for it, the fraction whose actual toolCallName and
-// resource-identifying arg value exactly match canonical. Turns with no canonical
-// tool call expected (e.g. sales/risk, which never call a mutation tool) are excluded
+// expected tool call defined for it (full or name-only, see toolCallMatches), the
+// fraction whose actual call matches canonical. Turns with no canonical tool call
+// expected at all (e.g. sales/risk, which never call a mutation tool) are excluded
 // from both numerator and denominator.
 export function toolCallAccuracy(runs: RunRecord[], trajectories: CanonicalTrajectory[]): number {
   let matches = 0;
@@ -127,24 +134,17 @@ export function toolCallAccuracy(runs: RunRecord[], trajectories: CanonicalTraje
 // Fraction of runs (not turns) where, for every stage: (1) the actual role-set equals
 // the canonical role-set for that stage (order-independent within a stage, since
 // stage-2 roles run concurrently by design); (2) every role WITH a canonical expected
-// tool call made a matching actual call; (3) for a stage with exactly one role and no
-// expectedToolCalls entry for it (e.g. a sales-only or risk-only stage — the only
-// stage shape in this codebase's canonical trajectories where a role is provably never
-// expected to call any tool at all, anywhere), that role made no tool call either (it
-// exceeding its authority is a mismatch, not a silent pass). This check is
-// deliberately restricted to single-role, entry-less stages: a *multi*-role stage
-// with no expectedToolCalls entries (e.g. the initial negotiating-pass stage, where
-// inventory/procurement/logistics still issue real tool calls per
-// evaluationScripts.ts even though the resulting holds are unchecked/later released)
-// or a role omitted from an otherwise-populated stage (e.g. `finance` during the
-// ADVANCE_30 stage — its only tool call has no resource-identity argument to check,
-// per canonicalTrajectories.ts's own comment) are known cases where a role can
-// legitimately call a tool without a canonical entry, so those are intentionally left
-// unchecked rather than guessed at. Separately, at the run level, no role may have
-// actual calls left over beyond what the canonical trajectory ever expected for it (a
-// duplicate/extra invocation is also a mismatch, not silently dropped). Runs whose
-// fixtureId has no canonical trajectory defined are excluded from the denominator
-// (there is nothing to compare against).
+// tool call entry (full or name-only, see toolCallMatches) made a matching actual
+// call; (3) every role WITHOUT a canonical expected tool call entry for that stage
+// made no tool call at all (exceeding its authority is a mismatch, not a silent pass).
+// This "no entry means no call" rule applies uniformly to every role in every stage —
+// this codebase's canonical trajectories give an explicit entry (full or name-only) to
+// every role that ever actually issues a tool call in a given stage, so an absent
+// entry always and only means "this role calls nothing here," never "unchecked."
+// Separately, at the run level, no role may have actual calls left over beyond what
+// the canonical trajectory ever expected for it (a duplicate/extra invocation is also
+// a mismatch, not silently dropped). Runs whose fixtureId has no canonical trajectory
+// defined are excluded from the denominator (there is nothing to compare against).
 export function trajectoryMatchRate(runs: RunRecord[], trajectories: CanonicalTrajectory[]): number {
   const comparable = runs.filter((run) => trajectories.some((t) => t.fixtureId === run.fixtureId));
   if (comparable.length === 0) return 0;
@@ -161,14 +161,13 @@ export function trajectoryMatchRate(runs: RunRecord[], trajectories: CanonicalTr
         for (const role of expectedRoles) {
           if (!actualRoles.has(role)) return false;
         }
-        const soleRoleNeverCallsHere = stage.roles.length === 1 && Object.keys(stage.expectedToolCalls).length === 0;
         for (const role of stage.roles) {
           const expected = stage.expectedToolCalls[role];
           const actual = actualCallsByRole[role];
           if (expected) {
             if (!toolCallMatches(actual, expected)) return false;
-          } else if (soleRoleNeverCallsHere && actual?.toolCallName != null) {
-            // This stage's only role has no canonical expected tool call, so any
+          } else if (actual?.toolCallName != null) {
+            // This role has no canonical expected tool call in this stage, so any
             // actual tool call it made here exceeds its authority — a mismatch.
             return false;
           }
