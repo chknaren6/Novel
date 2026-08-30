@@ -22,7 +22,38 @@ export type BuyerResponseResult =
   | { status: "prepared"; certificateId: string }
   | { status: "negotiating"; counterofferId: string }
   | { status: "committed"; certificateId: string }
-  | { status: "escalated"; reason: string };
+  | { status: "escalated"; reason: string }
+  // The counteroffer was already accepted, but the case has not yet reached a
+  // terminal status (evaluating/committing, or negotiating as a defensive guard
+  // even though dealSubmitted.ts's business rules don't currently route an
+  // already-accepted counteroffer's case back through negotiating). This is
+  // deliberately distinct from "cannot_commit": the caller (an ordinary retry, or
+  // the loser of a concurrent accept race) must not be told the deal is dead when
+  // it may still resolve to "committed" moments later.
+  | { status: "in_progress" };
+
+// Idempotent-replay logic for an already-"accepted" counteroffer: re-derives what the
+// original accept call did (or is still doing) purely by reading current case/
+// certificate state, without repeating any of the transition/evaluation/commit work.
+// Shared by the top-of-function replay check and by the loser side of the
+// updateMany race guards below, so both paths report the exact same outcome for the
+// exact same persisted state instead of maintaining two copies of this logic.
+async function resolveAcceptedCounteroffer(db: PrismaClient, caseId: string): Promise<BuyerResponseResult> {
+  const dealCase = await db.dealCase.findUniqueOrThrow({ where: { id: caseId } });
+  if (dealCase.status === "committed") {
+    const certificate = await db.commitCertificate.findFirstOrThrow({ where: { caseId: dealCase.id, status: "consumed" } });
+    return { status: "committed", certificateId: certificate.id };
+  }
+  if (dealCase.status === "prepared") {
+    const certificate = await db.commitCertificate.findFirstOrThrow({ where: { caseId: dealCase.id, status: "valid" } });
+    return { status: "prepared", certificateId: certificate.id };
+  }
+  if (dealCase.status === "escalated") return { status: "escalated", reason: "duplicate_accept_after_escalation" };
+  if (dealCase.status === "evaluating" || dealCase.status === "committing" || dealCase.status === "negotiating") {
+    return { status: "in_progress" };
+  }
+  return { status: "cannot_commit" };
+}
 
 // Verifies a signed buyer token, expiry, offer status, and case version before
 // persisting anything. A tampered signature, an already-resolved offer, or an offer
@@ -34,19 +65,7 @@ export async function runBuyerResponse(db: PrismaClient, gateway: ModelGateway, 
   const counteroffer = await db.counteroffer.findUnique({ where: { tokenHash: hashBuyerToken(input.buyerToken) } });
   if (!counteroffer) return { status: "invalid_or_expired" };
 
-  if (counteroffer.status === "accepted") {
-    const dealCase = await db.dealCase.findUniqueOrThrow({ where: { id: counteroffer.caseId } });
-    if (dealCase.status === "committed") {
-      const certificate = await db.commitCertificate.findFirstOrThrow({ where: { caseId: dealCase.id, status: "consumed" } });
-      return { status: "committed", certificateId: certificate.id };
-    }
-    if (dealCase.status === "prepared") {
-      const certificate = await db.commitCertificate.findFirstOrThrow({ where: { caseId: dealCase.id, status: "valid" } });
-      return { status: "prepared", certificateId: certificate.id };
-    }
-    if (dealCase.status === "escalated") return { status: "escalated", reason: "duplicate_accept_after_escalation" };
-    return { status: "cannot_commit" };
-  }
+  if (counteroffer.status === "accepted") return resolveAcceptedCounteroffer(db, counteroffer.caseId);
   if (counteroffer.status === "rejected") return { status: "cannot_commit" };
   if (counteroffer.status !== "sent" || counteroffer.expiresAt <= new Date()) return { status: "invalid_or_expired" };
 
@@ -54,13 +73,33 @@ export async function runBuyerResponse(db: PrismaClient, gateway: ModelGateway, 
   if (dealCase.activeTermsVersion !== counteroffer.sourceTermsVersion) return { status: "invalid_or_expired" };
 
   if (input.response === "reject") {
-    await db.counteroffer.update({ where: { id: counteroffer.id }, data: { status: "rejected", respondedAt: new Date() } });
+    // Atomic guard, not a plain update: a concurrent caller could resolve this same
+    // counteroffer (accept or reject) between the "sent" check above and this write —
+    // see src/reservations/coordinator.ts's breakCertificate for why this codebase
+    // treats every status-transition write this way, not just the read-then-branch.
+    const rejectUpdate = await db.counteroffer.updateMany({ where: { id: counteroffer.id, status: "sent" }, data: { status: "rejected", respondedAt: new Date() } });
+    if (rejectUpdate.count === 0) {
+      // Lost the race — someone else already resolved this counteroffer first. Route
+      // through the same replay logic a duplicate request would hit, rather than
+      // touching dealCase/emitCaseEvent on behalf of a write that never happened.
+      const current = await db.counteroffer.findUniqueOrThrow({ where: { id: counteroffer.id } });
+      if (current.status === "accepted") return resolveAcceptedCounteroffer(db, current.caseId);
+      return { status: "cannot_commit" };
+    }
     await transitionCase(db, { caseId: dealCase.id, expectedStatus: "negotiating", expectedVersion: dealCase.activeTermsVersion, nextStatus: "cannot_commit" });
     await emitCaseEvent(db, { caseId: dealCase.id, eventType: "buyer.counterterm_rejected", caseVersion: dealCase.activeTermsVersion, actorType: "buyer", actorRef: "buyer", payload: { counterofferId: counteroffer.id }, traceId: input.traceId });
     return { status: "cannot_commit" };
   }
 
-  await db.counteroffer.update({ where: { id: counteroffer.id }, data: { status: "accepted", respondedAt: new Date() } });
+  // Same guard on the accept path: only the caller that actually wins this CAS write
+  // is allowed to drive the dealCase transition, evaluateAndRoute, and runCommit below
+  // — a loser must never execute any of that on behalf of the winner.
+  const acceptUpdate = await db.counteroffer.updateMany({ where: { id: counteroffer.id, status: "sent" }, data: { status: "accepted", respondedAt: new Date() } });
+  if (acceptUpdate.count === 0) {
+    const current = await db.counteroffer.findUniqueOrThrow({ where: { id: counteroffer.id } });
+    if (current.status === "accepted") return resolveAcceptedCounteroffer(db, current.caseId);
+    return { status: "cannot_commit" };
+  }
 
   // transitionCase only ever swaps `status` (its WHERE/SET both key on status +
   // activeTermsVersion, but its SET never touches activeTermsVersion itself — see

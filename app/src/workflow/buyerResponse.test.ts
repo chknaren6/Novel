@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { testDb, resetTestDb } from "@/lib/testDb";
 import { runDealSubmitted } from "./dealSubmitted";
-import { runBuyerResponse } from "./buyerResponse";
+import { runBuyerResponse, type BuyerResponseResult } from "./buyerResponse";
 import { seedFixture } from "@/fixtures/seedFixture";
 import { FIXTURE_FEASIBLE_AFTER_ADVANCE } from "@/fixtures/definitions";
 import { FakeModelGateway } from "@/gateway/fakeGateway";
@@ -92,5 +92,89 @@ describe("runBuyerResponse", () => {
     const second = await runBuyerResponse(testDb, gateway, { buyerToken: submitted.buyerToken, response: "accept", modelId: "fake-model-v1", timeoutMs: 2000, traceId: "trace-3", buyerLinkSigningSecret: SECRET });
     expect(first.status).toBe("committed");
     expect(second).toEqual(first);
+  });
+
+  it("reports in_progress rather than cannot_commit when a retry lands mid-evaluation", async () => {
+    const { dealCase } = await seedFixture(testDb, FIXTURE_FEASIBLE_AFTER_ADVANCE);
+    const gateway = new FakeModelGateway(script);
+    const submitted = await runDealSubmitted(testDb, gateway, { caseId: dealCase.id, modelId: "fake-model-v1", timeoutMs: 2000, traceId: "trace-1", buyerLinkSigningSecret: SECRET });
+    if (submitted.status !== "negotiating") throw new Error("fixture setup expected negotiating");
+
+    // Simulate a concurrent/retried request landing mid-evaluation: the counteroffer
+    // is already recorded as accepted, but the case hasn't reached a terminal status
+    // yet (evaluateAndRoute occupies "evaluating" for the entire duration of its six
+    // role/model calls).
+    const counteroffer = await testDb.counteroffer.findFirstOrThrow({ where: { caseId: dealCase.id, status: "sent" } });
+    await testDb.counteroffer.update({ where: { id: counteroffer.id }, data: { status: "accepted", respondedAt: new Date() } });
+    await testDb.dealCase.update({ where: { id: dealCase.id }, data: { status: "evaluating" } });
+
+    const result = await runBuyerResponse(testDb, gateway, { buyerToken: submitted.buyerToken, response: "accept", modelId: "fake-model-v1", timeoutMs: 2000, traceId: "trace-2", buyerLinkSigningSecret: SECRET });
+
+    expect(result.status).not.toBe("cannot_commit");
+    expect(result).toEqual({ status: "in_progress" });
+  });
+
+  it("resolves both calls gracefully under a concurrent accept/accept race on the same token", async () => {
+    const { dealCase } = await seedFixture(testDb, FIXTURE_FEASIBLE_AFTER_ADVANCE);
+    const gateway = new FakeModelGateway(script);
+    const submitted = await runDealSubmitted(testDb, gateway, { caseId: dealCase.id, modelId: "fake-model-v1", timeoutMs: 2000, traceId: "trace-1", buyerLinkSigningSecret: SECRET });
+    if (submitted.status !== "negotiating") throw new Error("fixture setup expected negotiating");
+
+    const call = (traceId: string) =>
+      runBuyerResponse(testDb, gateway, { buyerToken: submitted.buyerToken, response: "accept", modelId: "fake-model-v1", timeoutMs: 2000, traceId, buyerLinkSigningSecret: SECRET });
+
+    // Promise.allSettled (not Promise.all): before the fix, the losing call threw an
+    // unhandled ToolError("STALE_CASE_VERSION") instead of resolving, which would
+    // reject the whole Promise.all and hide the actual per-call outcomes.
+    const settled = await Promise.allSettled([call("trace-2a"), call("trace-2b")]);
+
+    for (const outcome of settled) {
+      expect(outcome.status).toBe("fulfilled");
+    }
+    const results = settled.map((outcome) => (outcome as PromiseFulfilledResult<BuyerResponseResult>).value);
+
+    // The loser of the race must resolve honestly ("in_progress") rather than either
+    // throwing or claiming a terminal status it can't back up; the winner drives the
+    // case all the way to "committed". Both are valid, non-contradictory outcomes.
+    for (const result of results) {
+      expect(["committed", "in_progress"]).toContain(result.status);
+    }
+    expect(results.some((result) => result.status === "committed")).toBe(true);
+
+    // The specific split the reviewer's live probe found: counteroffer.status and
+    // dealCase.status must never disagree about what happened to this event. Only one
+    // of the two calls may ever have won the guarded write, so exactly one outcome is
+    // possible here, not two inconsistent rows.
+    const counteroffer = await testDb.counteroffer.findFirstOrThrow({ where: { caseId: dealCase.id } });
+    const reloadedCase = await testDb.dealCase.findUniqueOrThrow({ where: { id: dealCase.id } });
+    expect(counteroffer.status).toBe("accepted");
+    expect(reloadedCase.status).toBe("committed");
+  });
+
+  it("resolves both calls consistently under a concurrent accept/reject race on the same token", async () => {
+    const { dealCase } = await seedFixture(testDb, FIXTURE_FEASIBLE_AFTER_ADVANCE);
+    const gateway = new FakeModelGateway(script);
+    const submitted = await runDealSubmitted(testDb, gateway, { caseId: dealCase.id, modelId: "fake-model-v1", timeoutMs: 2000, traceId: "trace-1", buyerLinkSigningSecret: SECRET });
+    if (submitted.status !== "negotiating") throw new Error("fixture setup expected negotiating");
+
+    const acceptCall = runBuyerResponse(testDb, gateway, { buyerToken: submitted.buyerToken, response: "accept", modelId: "fake-model-v1", timeoutMs: 2000, traceId: "trace-3a", buyerLinkSigningSecret: SECRET });
+    const rejectCall = runBuyerResponse(testDb, gateway, { buyerToken: submitted.buyerToken, response: "reject", modelId: "fake-model-v1", timeoutMs: 2000, traceId: "trace-3b", buyerLinkSigningSecret: SECRET });
+
+    const settled = await Promise.allSettled([acceptCall, rejectCall]);
+    for (const outcome of settled) {
+      expect(outcome.status).toBe("fulfilled");
+    }
+
+    // Whichever side actually wins the guarded write, the persisted counteroffer and
+    // case must describe the same outcome: a "rejected" counteroffer beside a
+    // "committed" case (the reviewer's probe result) must never happen.
+    const counteroffer = await testDb.counteroffer.findFirstOrThrow({ where: { caseId: dealCase.id } });
+    const reloadedCase = await testDb.dealCase.findUniqueOrThrow({ where: { id: dealCase.id } });
+    if (counteroffer.status === "accepted") {
+      expect(reloadedCase.status).toBe("committed");
+    } else {
+      expect(counteroffer.status).toBe("rejected");
+      expect(reloadedCase.status).toBe("cannot_commit");
+    }
   });
 });
