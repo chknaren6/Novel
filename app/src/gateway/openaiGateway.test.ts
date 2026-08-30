@@ -75,7 +75,87 @@ describe("OpenAIModelGateway", () => {
       { id: "resp-1", choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "call-1", type: "function", function: { name: "hold_supplier_option", arguments: "{}" } }] } }] },
     ]);
     const gateway = new OpenAIModelGateway(client, "gpt-4o-mini");
-    await expect(gateway.runRole(baseInput({ readTools: [{ name: "get_stock", description: "read stock", parametersSchema: {}, execute: vi.fn() }] }))).rejects.toThrow(ToolError);
+
+    let thrown: unknown;
+    try {
+      await gateway.runRole(baseInput({ readTools: [{ name: "get_stock", description: "read stock", parametersSchema: {}, execute: vi.fn() }] }));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ToolError);
+    expect((thrown as ToolError).code).toBe("FORBIDDEN_TOOL");
+  });
+
+  it("throws INVALID_INPUT when a tool call's arguments are not valid JSON", async () => {
+    const execute = vi.fn().mockResolvedValue({ reservationId: "RES-1" });
+    const mutationTool = { name: "hold_inventory", description: "hold stock", parametersSchema: {}, execute };
+    const client = fakeClient([
+      { id: "resp-1", choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "call-1", type: "function", function: { name: "hold_inventory", arguments: "not valid json" } }] } }] },
+    ]);
+    const gateway = new OpenAIModelGateway(client, "gpt-4o-mini");
+
+    let thrown: unknown;
+    try {
+      await gateway.runRole(baseInput({ mutationTool }));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ToolError);
+    expect((thrown as ToolError).code).toBe("INVALID_INPUT");
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("throws FORBIDDEN_TOOL when the model returns a tool call of an unsupported type", async () => {
+    const client = fakeClient([
+      { id: "resp-1", choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "call-1", type: "custom", function: { name: "hold_inventory", arguments: "{}" } }] } }] },
+    ]);
+    const gateway = new OpenAIModelGateway(client, "gpt-4o-mini");
+
+    let thrown: unknown;
+    try {
+      await gateway.runRole(baseInput({ readTools: [{ name: "get_stock", description: "read stock", parametersSchema: {}, execute: vi.fn() }] }));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ToolError);
+    expect((thrown as ToolError).code).toBe("FORBIDDEN_TOOL");
+  });
+
+  it("throws PROVIDER_UNAVAILABLE when the tool-round OpenAI call rejects", async () => {
+    const client = fakeClient([]);
+    (client.chat.completions.create as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("rate limited"));
+    const gateway = new OpenAIModelGateway(client, "gpt-4o-mini");
+
+    let thrown: unknown;
+    try {
+      await gateway.runRole(baseInput({ readTools: [{ name: "get_stock", description: "read stock", parametersSchema: {}, execute: vi.fn() }] }));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ToolError);
+    expect((thrown as ToolError).code).toBe("PROVIDER_UNAVAILABLE");
+    expect((thrown as ToolError).retryable).toBe(true);
+  });
+
+  it("throws PROVIDER_UNAVAILABLE when the final structured-output OpenAI call rejects", async () => {
+    const execute = vi.fn().mockResolvedValue({ reservationId: "RES-1" });
+    const mutationTool = { name: "hold_inventory", description: "hold stock", parametersSchema: {}, execute };
+    const client = fakeClient([
+      { id: "resp-1", choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "call-1", type: "function", function: { name: "hold_inventory", arguments: JSON.stringify({ quantity: 199 }) } }] } }] },
+    ]);
+    (client.chat.completions.create as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("timeout"));
+    const gateway = new OpenAIModelGateway(client, "gpt-4o-mini");
+
+    let thrown: unknown;
+    try {
+      await gateway.runRole(baseInput({ mutationTool }));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ToolError);
+    expect((thrown as ToolError).code).toBe("PROVIDER_UNAVAILABLE");
+    expect((thrown as ToolError).retryable).toBe(true);
+    expect(execute).toHaveBeenCalled();
   });
 
   it("throws a policy-violation ToolError when the model requests more than one tool call in a single round", async () => {
@@ -99,7 +179,15 @@ describe("OpenAIModelGateway", () => {
       },
     ]);
     const gateway = new OpenAIModelGateway(client, "gpt-4o-mini");
-    await expect(gateway.runRole(baseInput({ mutationTool }))).rejects.toThrow(ToolError);
+
+    let thrown: unknown;
+    try {
+      await gateway.runRole(baseInput({ mutationTool }));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ToolError);
+    expect((thrown as ToolError).code).toBe("POLICY_VIOLATION");
     expect(execute).not.toHaveBeenCalled();
   });
 });

@@ -31,9 +31,10 @@ export class OpenAIModelGateway implements ModelGateway {
     let gatewayRequestId: string | null = null;
 
     if (tools.length > 0) {
-      const first = await this.client.chat.completions.create(
+      const first = await this.createChatCompletion(
+        input,
         { model: this.modelId, messages, tools: tools.map(toOpenAITool), tool_choice: "auto" },
-        { timeout: input.timeoutMs },
+        "tool-round",
       );
       gatewayRequestId = first.id;
       const message = first.choices[0]!.message;
@@ -59,6 +60,9 @@ export class OpenAIModelGateway implements ModelGateway {
 
       const call = requestedCalls[0];
       if (call && call.type === "function") {
+        // Assumes tool names are unique across readTools and mutationTool for a given
+        // role invocation; if that invariant is ever violated, the read tool silently wins
+        // (concatenation order in `tools` above puts readTools first).
         const tool = tools.find((t) => t.name === call.function.name);
         // Design decision: mirror FakeModelGateway's FORBIDDEN_TOOL handling for the same
         // conceptual situation (a tool call naming something not offered to the role).
@@ -71,20 +75,46 @@ export class OpenAIModelGateway implements ModelGateway {
             false,
           );
         }
-        const args = JSON.parse(call.function.arguments || "{}");
+        // toOpenAITool doesn't set strict:true on the function definition, so — unlike the
+        // final response_format=json_schema call below — OpenAI does not guarantee
+        // call.function.arguments is valid JSON. Mirror the final-response parse's
+        // try/catch so malformed arguments surface as a ToolError, not a raw SyntaxError.
+        let args: unknown;
+        try {
+          args = JSON.parse(call.function.arguments || "{}");
+        } catch (error) {
+          throw new ToolError(
+            "INVALID_INPUT",
+            `Role "${input.role}" tool call to "${call.function.name}" had invalid JSON arguments (${call.function.arguments}): ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+            false,
+          );
+        }
         const result = await tool.execute(args);
         toolCalls = [{ name: tool.name, args, result }];
         messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
+      } else if (call) {
+        // A tool_calls entry with a type other than "function" (e.g. a future
+        // custom/built-in tool type). Proceeding as if no tool call had been requested
+        // would silently ignore it; unregistered tool names are not silently ignored
+        // above, so this shouldn't be either.
+        throw new ToolError(
+          "FORBIDDEN_TOOL",
+          `Role "${input.role}" received an unsupported tool call type "${call.type}"`,
+          false,
+        );
       }
     }
 
-    const final = await this.client.chat.completions.create(
+    const final = await this.createChatCompletion(
+      input,
       {
         model: this.modelId,
         messages: [...messages, { role: "user", content: "Return your final decision now as the required JSON object." }],
         response_format: { type: "json_schema", json_schema: { name: "role_model_output", strict: true, schema: ROLE_MODEL_OUTPUT_JSON_SCHEMA } },
       },
-      { timeout: input.timeoutMs },
+      "final-response",
     );
     gatewayRequestId = final.id;
 
@@ -109,5 +139,26 @@ export class OpenAIModelGateway implements ModelGateway {
     const output: RoleModelOutput = parsed.data;
 
     return { output, toolCalls, modelId: this.modelId, gatewayRequestId };
+  }
+
+  // Normalizes any chat.completions.create rejection (network error, rate limit, timeout,
+  // malformed OpenAI response) into ToolError("PROVIDER_UNAVAILABLE", ..., retryable: true)
+  // instead of letting a raw OpenAI SDK exception escape this gateway. This is the first
+  // real external-provider network call in this codebase; 03-AGENT-ARCHITECTURE.md's stated
+  // requirement is "Timeout produces `unavailable`, not an assumed approval."
+  private async createChatCompletion(
+    input: RoleRunInput,
+    params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
+    step: string,
+  ): Promise<OpenAI.Chat.ChatCompletion> {
+    try {
+      return await this.client.chat.completions.create(params, { timeout: input.timeoutMs });
+    } catch (error) {
+      throw new ToolError(
+        "PROVIDER_UNAVAILABLE",
+        `Role "${input.role}" OpenAI ${step} call failed: ${error instanceof Error ? error.message : String(error)}`,
+        true,
+      );
+    }
   }
 }
