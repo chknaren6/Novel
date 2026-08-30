@@ -24,6 +24,7 @@ export async function resetTestDb() {
     testDb.supplierOption.deleteMany(),
     testDb.inventoryPosition.deleteMany(),
     testDb.customer.deleteMany(),
+    testDb.marketplaceBuyer.deleteMany(),
     testDb.company.deleteMany(),
     testDb.operator.deleteMany(),
   ]);
