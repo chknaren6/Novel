@@ -49,6 +49,18 @@ describe("POST /api/b2c/negotiation-brief", () => {
     expect(response.status).toBe(400);
   });
 
+  it("returns 400 when a field has the wrong type", async () => {
+    const request = new Request("http://localhost/api/b2c/negotiation-brief", {
+      method: "POST",
+      body: JSON.stringify({
+        sku: "SKU-1", itemDescription: "x", quantity: 1, deliveryDeadline: "2026-09-15",
+        chosenSupplierId: "VEND-A", chosenListedUnitCostMinor: "abc", otherCandidates: [],
+      }),
+    });
+    const response = await POST(request);
+    expect(response.status).toBe(400);
+  });
+
   it("returns 502 when the LLM call fails", async () => {
     mockCreate.mockRejectedValueOnce(new Error("network down"));
     const request = new Request("http://localhost/api/b2c/negotiation-brief", {
