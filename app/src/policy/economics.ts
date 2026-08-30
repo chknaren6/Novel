@@ -47,9 +47,18 @@ export function calculateDealEconomics(input: DealEconomicsInput): DealEconomics
   };
 }
 
+// The one approved counterterm this build supports: a 30% advance deposit. Shared by
+// evaluateAndRoute (dealSubmitted.ts) and runCommit (commit.ts) so the figure can't
+// drift between the two call sites that both feed it into calculateDealEconomics.
+export const ADVANCE_DEPOSIT_BPS = 3000;
+
 // Per-SKU unit cost is a policy/fixture constant, not user input — it lives here next
 // to the engine that consumes it rather than threaded through every API call.
 // Task 23 documents how 293_312 (MBEW.STPRS) was chosen for MAT-10001.
 export const SKU_UNIT_COST_MINOR: Record<string, number> = {
   "MAT-10001": 293_312,
+  // MBEW.STPRS for MAT-CG-10008 (Rs 28,037.70) — added for the live Crompton-data demo
+  // (order SO-13183661); without an entry here, evaluateAndRoute's `?? 0` fallback would
+  // silently price this SKU's cost at zero and inflate the displayed contribution margin.
+  "MAT-CG-10008": 2_803_770,
 };

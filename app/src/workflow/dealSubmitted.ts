@@ -4,7 +4,7 @@ import { ToolError, type PaymentTerms, type ReservationDomain, type RoleId } fro
 import { transitionCase } from "@/state/transitions";
 import { emitCaseEvent } from "./events";
 import { runRoleAgent } from "@/roles/roleRuntime";
-import { calculateDealEconomics, SKU_UNIT_COST_MINOR } from "@/policy/economics";
+import { calculateDealEconomics, SKU_UNIT_COST_MINOR, ADVANCE_DEPOSIT_BPS } from "@/policy/economics";
 import { prepareCommitCertificate, abortCommitment, releaseReservations } from "@/reservations/coordinator";
 import { createCounteroffer } from "./counteroffer";
 import { fromJsonColumn } from "@/lib/json-column";
@@ -49,7 +49,7 @@ export async function evaluateAndRoute(db: PrismaClient, gateway: ModelGateway, 
     quantity: terms.quantity,
     unitCostMinor: SKU_UNIT_COST_MINOR[terms.sku] ?? 0,
     paymentTerms: terms.paymentTerms as PaymentTerms,
-    depositBps: 3000,
+    depositBps: ADVANCE_DEPOSIT_BPS,
   });
 
   const toolContext = { customerId: customer.id, sku: terms.sku, destinationId: DESTINATION_ID, paymentTerms: terms.paymentTerms as PaymentTerms };
