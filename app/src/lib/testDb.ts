@@ -1,25 +1,16 @@
 import { PrismaClient } from "@prisma/client";
 
-// A second Prisma client pointed at TEST_DATABASE_URL, independent of the dev/prod
-// singleton in db.ts (which reads DATABASE_URL), so the test suite never touches the
-// same database an operator might be live-demoing against. Since the datasource is
-// Postgres (not a throwaway local SQLite file), this is a required, separately-named
-// env var rather than a hardcoded path — resetTestDb() below does a full deleteMany()
-// sweep, which would silently wipe real demo data if it ever ran against DATABASE_URL
-// by accident. Point it at a distinct Postgres schema/database (e.g. the same Supabase
-// project with `?schema=test` appended to the connection string) so it's isolated but
-// needs no separate signup.
-const testDatabaseUrl = process.env.TEST_DATABASE_URL;
-if (!testDatabaseUrl) {
-  throw new Error(
-    "testDb: TEST_DATABASE_URL is not set. Point it at a Postgres database/schema " +
-      "distinct from DATABASE_URL — resetTestDb() deletes all rows and must never run " +
-      "against a database with real data in it.",
-  );
-}
-
+// A second Prisma client pointed at test.db, independent of the dev singleton in db.ts,
+// so the test suite never touches dev.db.
+//
+// NOTE: this is provider-coupled to whatever prisma/schema.prisma's datasource currently
+// is. While the datasource is sqlite (local MVP validation), this hardcoded file path is
+// fine. If/when the datasource moves to Postgres (Supabase) again, this must go back to
+// a required, separately-named TEST_DATABASE_URL env var — never DATABASE_URL — because
+// resetTestDb() below does a full deleteMany() sweep that would silently wipe real data
+// if it ever ran against a shared Postgres database.
 export const testDb = new PrismaClient({
-  datasources: { db: { url: testDatabaseUrl } },
+  datasources: { db: { url: "file:./test.db" } },
 });
 
 export async function resetTestDb() {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { Suspense, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { INK, SUB, GREEN, LINE, BAD, SANS, SERIF } from "@/app/market/styles";
@@ -11,7 +11,12 @@ const box = { border: `1px solid ${LINE}`, borderRadius: 8, padding: "10px 14px"
 // Single-operator MVP: there is no self-service signup page. The one operator account
 // is created directly in the Supabase dashboard (Authentication -> Users -> Add user),
 // which avoids building and securing a public signup flow this project doesn't need.
-export default function LoginPage() {
+//
+// useSearchParams() forces this subtree to opt out of static prerendering unless it's
+// wrapped in its own Suspense boundary (Next.js App Router requirement) — LoginPage
+// below provides that boundary so `next build` can still statically generate the page
+// shell around it.
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
@@ -71,5 +76,13 @@ export default function LoginPage() {
         </button>
       </form>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }

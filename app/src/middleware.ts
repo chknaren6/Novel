@@ -8,6 +8,14 @@ import { NextResponse, type NextRequest } from "next/server";
 const PUBLIC_MARKET_PATH = /^\/market\/[^/]+\/accept/;
 
 export async function middleware(request: NextRequest) {
+  // Supabase isn't configured yet for local MVP validation (no project/keys set up) —
+  // skip auth entirely rather than crash every request on a missing env var. Once
+  // NEXT_PUBLIC_SUPABASE_URL/ANON_KEY are set (real Supabase project), this middleware
+  // starts enforcing the operator login automatically, with no code change needed.
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    return NextResponse.next();
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
