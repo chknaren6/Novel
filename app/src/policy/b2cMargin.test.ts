@@ -21,4 +21,28 @@ describe("calculateB2CQuote", () => {
     expect(result.sellPriceMinor).toBe(88_950_000);
     expect(result.advanceBps).toBe(5_000);
   });
+
+  it("uses the mid margin band exactly at the Rs25k lower boundary (inclusive of the next band)", () => {
+    const result = calculateB2CQuote({ buyPriceMinor: 25_000_00, quantity: 1, operationalCostMinor: 0, riskBufferBps: 0 });
+    expect(result.marginBps).toBe(850);
+    expect(result.advanceBps).toBe(10_000);
+  });
+
+  it("uses the mid margin band exactly at the Rs2L upper boundary (inclusive)", () => {
+    const result = calculateB2CQuote({ buyPriceMinor: 200_000_00, quantity: 1, operationalCostMinor: 0, riskBufferBps: 0 });
+    expect(result.marginBps).toBe(850);
+    expect(result.advanceBps).toBe(7_000);
+  });
+
+  it("uses the top margin band one paisa above the Rs2L upper boundary", () => {
+    const result = calculateB2CQuote({ buyPriceMinor: 200_000_01, quantity: 1, operationalCostMinor: 0, riskBufferBps: 0 });
+    expect(result.marginBps).toBe(600);
+  });
+
+  it("uses the 70% advance band exactly at the Rs50k sell-value boundary (inclusive)", () => {
+    const result = calculateB2CQuote({ buyPriceMinor: 1_000_000, quantity: 1, operationalCostMinor: 3_875_000, riskBufferBps: 0 });
+    expect(result.sellPriceMinor).toBe(50_000_00);
+    expect(result.marginBps).toBe(1250);
+    expect(result.advanceBps).toBe(7_000);
+  });
 });
