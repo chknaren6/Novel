@@ -15,21 +15,23 @@
     "evaluate": "tsx scripts/evaluate.ts"
   },
   "dependencies": {
-    "next": "14.2.5",
+    "@prisma/client": "5.18.0",
+    "@supabase/ssr": "^0.12.5",
+    "@supabase/supabase-js": "^2.112.4",
+    "next": "^14.2.35",
+    "openai": "4.56.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "@prisma/client": "5.18.0",
-    "zod": "3.23.8",
-    "openai": "4.56.0"
+    "zod": "3.23.8"
   },
   "devDependencies": {
-    "typescript": "5.5.4",
     "@types/node": "20.14.15",
     "@types/react": "18.3.3",
     "@types/react-dom": "18.3.0",
+    "dotenv": "16.4.5",
     "prisma": "5.18.0",
-    "vitest": "2.0.5",
     "tsx": "4.16.5",
-    "dotenv": "16.4.5"
+    "typescript": "5.5.4",
+    "vitest": "2.0.5"
   }
 }
