@@ -62,6 +62,39 @@ Tasks 1–23 have no UI and no LLM network dependency (Task 20's real network ca
 
 ---
 
+## Metrics & Evaluation Addendum (added after Task 6, per user directive, 2026-08-30)
+
+**Scope change:** Tasks 32 (Operator UI) and 33 (Buyer UI) are **out of scope**. Backend agent pipeline + demo case test trials only, no frontend. Task 31 is redesigned per this addendum, superseding its original text below.
+
+**Directive:** report real, sourced metrics against real external baselines where a baseline genuinely exists, and precisely-defined internal metrics where it doesn't. Never invent a benchmark number.
+
+### Metrics catalog (definition · baseline+citation · instrumentation needed)
+
+1. **Task Success Rate** — % of runs where final `DealCase.status` matches `ALL_FIXTURES[].expectedTerminalState`. Metric framework: τ-bench (Yao et al., arXiv:2406.12045). No external number to beat (τ-bench's baselines are a different task domain); report CommitOS's own rate. Already computed by the original Task 31's `pass` field — just aggregate into a rate.
+2. **Tool Call Accuracy** — % of role invocations where the tool actually executed (name+args) matches the deterministic fixture script's specified tool call. Framework: τ-bench. **Needs new instrumentation**: `persistDecision` (Task 22) currently discards `RoleRunResult.toolCalls` — add a `toolCallsJson: String?` column to `DomainDecision` (small follow-up migration) storing `toJsonColumn([{name, args, result: {ok, errorCode?}}])`.
+3. **Trajectory Match** — did the case's actual `CaseEvent` sequence match the canonical expected sequence for its fixture (e.g. Case 1: deal.submitted → sales.decided → finance.decided → inventory.decided → procurement.decided → logistics.decided → risk.decided → commit.requested → case.committed)? Framework: τ-bench's headline metric (task success ≠ trajectory match). **Needs new instrumentation**: per-role `"<role>.decided"` CaseEvents are not currently emitted anywhere in Tasks 17-30 (only case-level milestones are) — add `emitCaseEvent(tx, {eventType: \`${role}.decided\`, ...})` right after `persistDecision` in Task 22's role runtime.
+4. **Latency p95** — full commit-flow wall-clock time (`elapsedMs`, already in Task 31's `RunResult`) across all 9 runs, nearest-rank p95. State plainly: n=9 is too small for a statistically meaningful p95 — report min/median/p95/max together, not p95 alone.
+5. **Time-to-Commit** — seconds from `DealCase.createdAt`/first CaseEvent to the terminal CaseEvent (`case.committed`/`case.cannot_commit`/`repair.requested`/`case.escalated`). Report per-fixture median. No new instrumentation needed (timestamps already exist per schema).
+6. **Hallucination Rate** — % of role decisions where the decision claimed a resource was available (`approve`) but the mutation tool call it triggered actually failed/errored, or no reservation was ever created to back an "approve". CommitOS-specific; no external benchmark exists for this exact shape (researched, confirmed absent) — track as an internal reliability metric. **Needs new instrumentation**: same `toolCallsJson` from #2, with the outcome captured.
+7. **Human Override Rate** — % of the 9 runs where `DealCase.status` ends `"escalated"` or a `case.escalated` event occurs at any point. Uses the schema's existing `escalated` status/events (Tasks 25/27 already emit these per the survey) — no new instrumentation. No external baseline (internal). For these 3 known-answer fixtures, expect ~0% — report that honestly as "0/9, by design — none of the 3 fixtures are constructed to require escalation," not silently omitted.
+8. **Recovery Success Rate** — for fixture `CASE-POST-COMMIT-DISRUPTION` only (3 of the 9 runs): % reaching `expectedTerminalState: "repaired"` vs. ending `escalated`. No new instrumentation (already computable from existing pass/fail logic filtered to this fixtureId). **No external numeric baseline** — the Snowflake "Agentic Enterprise Control Plane" post (user-provided source, fetched and confirmed) contains zero benchmark numbers, only a qualitative governance-layer vision. Report CommitOS's own measured result, plus a short written note that CommitOS's coordinator already implements, as working measured code (policy-gated prepare/commit/abort/compensate/repair, human escalation on unresolved risk), the governance pattern that post describes only conceptually. Never print a fabricated Snowflake percentage.
+9. **Perfect Order Rate (analog)** — APQC's real formula: %on-time × %complete × %damage-free × %accurate-docs per order. CommitOS analog per committed/repaired case: on-time = `DeliveryPlanOption.deliveryDate` ≤ `TermsVersion.deliveryDeadline`; complete = `deliveredQuantity` === `TermsVersion.quantity`; damage-free analog = no `ActionReceipt` for that case ever reached `failed`/`compensation_pending`; accurate-docs analog = no `TERMS_HASH_MISMATCH` ToolError occurred for the case. Multiply the four 0/1 indicators per case, average across committed/repaired runs. **Baseline, cited**: APQC median = 90%, top quartile ≥95% (apqc.org, verified directly via WebSearch on 2026-08-30). State the small-n caveat.
+10. **OTIF (analog)** — the on-time + complete components from #9, reported standalone as its own named metric. **Baseline**: industrial-manufacturing band 88–92% (matches this app's B2B/manufacturing domain — MCB circuit breakers etc; FMCG 95-98% and Walmart's 98% supplier requirement are context only, not our comparison band).
+
+### Honesty requirements for the Task 31 report (non-negotiable)
+- Every metric prints: its exact formula, its citation (or "no external baseline — internal metric"), and the sample size (n=9 total, n=3 for fixture-specific metrics) with a caveat that this is a demo-scale proof against known-answer fixtures, not a statistically powered claim against enterprise-wide medians.
+- Never state "beats APQC/OTIF" without also printing the measured value, the baseline value, and the source in the same output.
+- Snowflake comparison stays qualitative/architectural — never a fabricated percentage.
+
+### Instrumentation checklist (apply when that task is actually dispatched, not now)
+- **Task 22** (role runtime/persistDecision): add `toolCallsJson: String?` to `DomainDecision` (follow-up migration) + emit `"<role>.decided"` CaseEvents.
+- **Tasks 17/18** (coordinator): ensure the captured tool-call outcome reflects real success/failure, not just "attempted."
+- **Tasks 24-27** (workflows): no change — case-level milestone events already planned there cover what's needed.
+- **Task 31**: full redesign per this catalog — extend `RunResult`, add an aggregation pass over all 9 runs, print a structured report (console + `submission/metrics-report.json`) covering every metric above with formula + citation + caveat + pass/fail vs. baseline where one exists.
+- **Tasks 32/33**: skipped entirely.
+
+---
+
 ### Task 1: Scaffold Next.js + TypeScript + Vitest + Prisma + env files
 
 **Files:**
@@ -714,7 +747,7 @@ export function newId(prefix: string): string {
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `cd app && npx vitest run src/lib/money.test.ts src/lib/hash.test.ts`
-Expected: PASS (5 tests).
+Expected: PASS (7 tests).
 
 - [ ] **Step 7: Commit**
 
