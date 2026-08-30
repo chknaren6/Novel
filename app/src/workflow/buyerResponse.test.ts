@@ -114,6 +114,27 @@ describe("runBuyerResponse", () => {
     expect(result).toEqual({ status: "in_progress" });
   });
 
+  it("reports in_progress rather than cannot_commit when a retry lands mid-abort", async () => {
+    const { dealCase } = await seedFixture(testDb, FIXTURE_FEASIBLE_AFTER_ADVANCE);
+    const gateway = new FakeModelGateway(script);
+    const submitted = await runDealSubmitted(testDb, gateway, { caseId: dealCase.id, modelId: "fake-model-v1", timeoutMs: 2000, traceId: "trace-1", buyerLinkSigningSecret: SECRET });
+    if (submitted.status !== "negotiating") throw new Error("fixture setup expected negotiating");
+
+    // Simulate a concurrent/retried request landing mid-abort: the counteroffer is
+    // already recorded as accepted, but the case is in "aborting" — runCommit's
+    // abortCommitment (src/workflow/commit.ts) occupies this status for the entire
+    // duration of its sequential reservation-release loop across multiple domains,
+    // before the case reaches "escalated".
+    const counteroffer = await testDb.counteroffer.findFirstOrThrow({ where: { caseId: dealCase.id, status: "sent" } });
+    await testDb.counteroffer.update({ where: { id: counteroffer.id }, data: { status: "accepted", respondedAt: new Date() } });
+    await testDb.dealCase.update({ where: { id: dealCase.id }, data: { status: "aborting" } });
+
+    const result = await runBuyerResponse(testDb, gateway, { buyerToken: submitted.buyerToken, response: "accept", modelId: "fake-model-v1", timeoutMs: 2000, traceId: "trace-2", buyerLinkSigningSecret: SECRET });
+
+    expect(result.status).not.toBe("cannot_commit");
+    expect(result).toEqual({ status: "in_progress" });
+  });
+
   it("resolves both calls gracefully under a concurrent accept/accept race on the same token", async () => {
     const { dealCase } = await seedFixture(testDb, FIXTURE_FEASIBLE_AFTER_ADVANCE);
     const gateway = new FakeModelGateway(script);

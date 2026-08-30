@@ -24,12 +24,15 @@ export type BuyerResponseResult =
   | { status: "committed"; certificateId: string }
   | { status: "escalated"; reason: string }
   // The counteroffer was already accepted, but the case has not yet reached a
-  // terminal status (evaluating/committing, or negotiating as a defensive guard
-  // even though dealSubmitted.ts's business rules don't currently route an
-  // already-accepted counteroffer's case back through negotiating). This is
+  // terminal status (evaluating/committing/aborting, or negotiating as a defensive
+  // guard even though dealSubmitted.ts's business rules don't currently route an
+  // already-accepted counteroffer's case back through negotiating). "aborting" is
+  // the transient status runCommit uses while abortCommitment (src/workflow/commit.ts)
+  // sequentially releases held reservations across multiple domains before the case
+  // reaches "escalated" — just as transient as evaluating/committing. This is
   // deliberately distinct from "cannot_commit": the caller (an ordinary retry, or
   // the loser of a concurrent accept race) must not be told the deal is dead when
-  // it may still resolve to "committed" moments later.
+  // it may still resolve to "committed" (or "escalated") moments later.
   | { status: "in_progress" };
 
 // Idempotent-replay logic for an already-"accepted" counteroffer: re-derives what the
@@ -48,8 +51,8 @@ async function resolveAcceptedCounteroffer(db: PrismaClient, caseId: string): Pr
     const certificate = await db.commitCertificate.findFirstOrThrow({ where: { caseId: dealCase.id, status: "valid" } });
     return { status: "prepared", certificateId: certificate.id };
   }
-  if (dealCase.status === "escalated") return { status: "escalated", reason: "duplicate_accept_after_escalation" };
-  if (dealCase.status === "evaluating" || dealCase.status === "committing" || dealCase.status === "negotiating") {
+  if (dealCase.status === "escalated") return { status: "escalated", reason: "case_escalated" };
+  if (dealCase.status === "evaluating" || dealCase.status === "committing" || dealCase.status === "negotiating" || dealCase.status === "aborting") {
     return { status: "in_progress" };
   }
   return { status: "cannot_commit" };
