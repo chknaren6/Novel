@@ -45,4 +45,17 @@ describe("calculateB2CQuote", () => {
     expect(result.marginBps).toBe(1250);
     expect(result.advanceBps).toBe(7_000);
   });
+
+  it("uses the 70% advance band exactly at the Rs5L sell-value boundary (inclusive)", () => {
+    const result = calculateB2CQuote({ buyPriceMinor: 21_000_000, quantity: 1, operationalCostMinor: 27_740_000, riskBufferBps: 0 });
+    expect(result.marginBps).toBe(600);
+    expect(result.sellPriceMinor).toBe(500_000_00);
+    expect(result.advanceBps).toBe(7_000);
+  });
+
+  it("uses the 50% advance band one paisa above the Rs5L sell-value boundary", () => {
+    const result = calculateB2CQuote({ buyPriceMinor: 21_000_000, quantity: 1, operationalCostMinor: 27_740_001, riskBufferBps: 0 });
+    expect(result.sellPriceMinor).toBe(500_000_01);
+    expect(result.advanceBps).toBe(5_000);
+  });
 });
