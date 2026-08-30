@@ -3,6 +3,7 @@ import { canonicalTermsHash, signBuyerToken, hashBuyerToken } from "@/lib/hash";
 import { transitionCase } from "@/state/transitions";
 import { emitCaseEvent } from "../events";
 import { holdSupplierOption } from "@/adapters/supplierAdapter";
+import { abortCommitment } from "@/reservations/coordinator";
 import { calculateB2CQuote } from "@/policy/b2cMargin";
 import type { ParsedRequirement } from "./intake";
 
@@ -112,29 +113,52 @@ export async function createB2CCase(db: PrismaClient, input: CreateB2CCaseInput)
     traceId: input.traceId,
   });
 
-  await holdSupplierOption(db, {
-    caseId: dealCase.id,
-    caseVersion: 1,
-    termsHash,
-    supplierId: input.chosenSupplierId,
-    sku: input.sku,
-    quantity: input.parsedRequirement.quantity,
-    maxUnitCostMinor: input.listedUnitCostMinor,
-    maxLeadDays: input.listedLeadDays,
-    ttlSeconds: QUOTE_VALIDITY_SECONDS,
-  });
-
-  const buyerToken = signBuyerToken(`${dealCase.id}:1`, input.buyerLinkSigningSecret);
-  await db.counteroffer.create({
-    data: {
+  // If the supplier hold fails (e.g. the supplier's price/lead-time no longer clears the
+  // ceiling — a documented, expected race), the DealCase and TermsVersion already exist
+  // but no Counteroffer ever gets created. Since runB2CBuyerResponse can only reach a
+  // case through a Counteroffer.tokenHash, leaving the case in "evaluating" here would
+  // orphan it permanently with no code path able to resolve it — so route it to the same
+  // terminal, discoverable "cannot_commit" status dealSubmitted.ts uses for this class of
+  // failure instead.
+  try {
+    await holdSupplierOption(db, {
       caseId: dealCase.id,
-      sourceTermsVersion: 1,
-      proposedTermsVersion: 1,
-      tokenHash: hashBuyerToken(buyerToken),
-      status: "sent",
-      expiresAt: new Date(Date.now() + QUOTE_VALIDITY_SECONDS * 1000),
-    },
-  });
+      caseVersion: 1,
+      termsHash,
+      supplierId: input.chosenSupplierId,
+      sku: input.sku,
+      quantity: input.parsedRequirement.quantity,
+      maxUnitCostMinor: input.listedUnitCostMinor,
+      maxLeadDays: input.listedLeadDays,
+      ttlSeconds: QUOTE_VALIDITY_SECONDS,
+    });
 
-  return { caseId: dealCase.id, buyerToken, sellPriceMinor: quote.sellPriceMinor };
+    const buyerToken = signBuyerToken(`${dealCase.id}:1`, input.buyerLinkSigningSecret);
+    await db.counteroffer.create({
+      data: {
+        caseId: dealCase.id,
+        sourceTermsVersion: 1,
+        proposedTermsVersion: 1,
+        tokenHash: hashBuyerToken(buyerToken),
+        status: "sent",
+        expiresAt: new Date(Date.now() + QUOTE_VALIDITY_SECONDS * 1000),
+      },
+    });
+
+    return { caseId: dealCase.id, buyerToken, sellPriceMinor: quote.sellPriceMinor };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    await abortCommitment(db, { caseId: dealCase.id, caseVersion: 1 });
+    await transitionCase(db, { caseId: dealCase.id, expectedStatus: "evaluating", expectedVersion: 1, nextStatus: "cannot_commit" });
+    await emitCaseEvent(db, {
+      caseId: dealCase.id,
+      eventType: "case.cannot_commit",
+      caseVersion: 1,
+      actorType: "coordinator",
+      actorRef: "workflow",
+      payload: { reason },
+      traceId: input.traceId,
+    });
+    throw error;
+  }
 }

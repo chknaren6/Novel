@@ -65,4 +65,16 @@ describe("createB2CCase", () => {
     const reservation = await testDb.reservation.findFirstOrThrow({ where: { caseId: result.caseId, domain: "supplier" } });
     expect(reservation.status).toBe("held");
   });
+
+  it("leaves the case in cannot_commit with a case.cannot_commit event when the supplier hold fails", async () => {
+    await testDb.supplierOption.updateMany({ where: { supplierId: "VEND-A", sku: "SKU-1" }, data: { unitCostMinor: 150_00 } });
+
+    await expect(createB2CCase(testDb, { ...BASE_INPUT, listedUnitCostMinor: 100_00 })).rejects.toThrow();
+
+    const dealCase = await testDb.dealCase.findFirstOrThrow();
+    expect(dealCase.status).toBe("cannot_commit");
+
+    const events = await testDb.caseEvent.findMany({ where: { caseId: dealCase.id } });
+    expect(events.map((e) => e.eventType)).toContain("case.cannot_commit");
+  });
 });
