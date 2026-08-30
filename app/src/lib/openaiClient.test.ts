@@ -35,4 +35,11 @@ describe("getOpenAIClient", () => {
     process.env.OPENAI_REQUEST_TIMEOUT_MS = "5000";
     expect(getOpenAIClient().timeoutMs).toBe(5000);
   });
+
+  it("throws when OPENAI_REQUEST_TIMEOUT_MS is not a valid number", () => {
+    process.env.OPENAI_API_KEY = "sk-test";
+    process.env.OPENAI_MODEL_ID = "gpt-5-nano";
+    process.env.OPENAI_REQUEST_TIMEOUT_MS = "not-a-number";
+    expect(() => getOpenAIClient()).toThrow(/OPENAI_REQUEST_TIMEOUT_MS/);
+  });
 });
