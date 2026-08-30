@@ -70,10 +70,9 @@ export async function getInventoryPositions(db: PrismaClient, sku: string) {
 }
 
 // NOTE: This returns every supplier option for the SKU, without narrowing by the
-// additional parameters (requiredQuantity, backedOrigins, deadline) that
-// 05-TOOL-CONTRACTS.md describes for this tool. Deferred until a caller (role
-// runtime / tool registry, a later task) actually needs and can supply those
-// parameters — not a silent oversight.
+// additional `requiredQuantity` parameter that 05-TOOL-CONTRACTS.md describes for
+// this tool. Deferred until a caller (role runtime / tool registry, a later task)
+// actually needs and can supply it — not a silent oversight.
 export async function getSupplierOptions(db: PrismaClient, sku: string) {
   const options = await db.supplierOption.findMany({ where: { sku } });
   return evidenceEnvelope("supplier_option", {
@@ -82,10 +81,9 @@ export async function getSupplierOptions(db: PrismaClient, sku: string) {
 }
 
 // NOTE: This returns every delivery plan for the destination, without narrowing by
-// the additional parameters (requiredQuantity, backedOrigins, deadline) that
-// 05-TOOL-CONTRACTS.md describes for this tool. Deferred until a caller (role
-// runtime / tool registry, a later task) actually needs and can supply those
-// parameters — not a silent oversight.
+// the additional `backedOrigins`/`deadline` parameters that 05-TOOL-CONTRACTS.md
+// describes for this tool. Deferred until a caller (role runtime / tool registry, a
+// later task) actually needs and can supply them — not a silent oversight.
 export async function getDeliveryOptions(db: PrismaClient, destinationId: string) {
   const plans = await db.deliveryPlanOption.findMany({ where: { destinationId } });
   return evidenceEnvelope("delivery_plan_option", {
