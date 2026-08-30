@@ -8,6 +8,7 @@ import { FIXTURE_POST_COMMIT_DISRUPTION } from "@/fixtures/definitions";
 import { FakeModelGateway } from "@/gateway/fakeGateway";
 import type { RoleRunInput } from "@/gateway/modelGateway";
 import type { RoleModelOutput } from "@/lib/types";
+import { fromJsonColumn } from "@/lib/json-column";
 
 const SECRET = "test-secret";
 const APPROVE = (evidenceRefs: string[], explanation: string): RoleModelOutput => ({ decision: "approve", constraints: [], reservationRequests: [], counterterms: [], evidenceRefs, explanation });
@@ -117,6 +118,11 @@ describe("runSupplierDisruption", () => {
     if (result.status !== "cannot_commit") throw new Error("expected cannot_commit");
     expect(result.reason).toBe("risk_veto");
     expect((result as { status: string }).status).not.toBe("escalated");
+    // Clean failure: nothing from the repair round got as far as being committed or
+    // receipted, unlike the partial-repair test below.
+    expect(result.partialRepair).toBe(false);
+    expect(result.committedReservationIds).toEqual([]);
+    expect(result.receiptedActionsExecuted).toEqual([]);
 
     const reloaded = await testDb.dealCase.findUniqueOrThrow({ where: { id: dealCase.id } });
     expect(reloaded.status).toBe("cannot_commit");
@@ -124,5 +130,47 @@ describe("runSupplierDisruption", () => {
     const events = await testDb.caseEvent.findMany({ where: { caseId: dealCase.id } });
     expect(events.some((e) => e.eventType === "case.cannot_commit")).toBe(true);
     expect(events.some((e) => e.eventType === "case.escalated")).toBe(false);
+  });
+
+  it("fails closed to cannot_commit with partial-repair diagnostics (not stuck at evaluating) when a repair receipted action fails after reservations already committed", async () => {
+    const { dealCase, gateway } = await commitFixtureCase();
+
+    // Break the precondition for the second repair receipted action
+    // (outbox.send_correction): its `originalMessage` lookup requires the case's
+    // original "backed_promise" outbox message to still exist. Deleting it forces a
+    // throw AFTER the reservation-commit loop has already run and the first repair
+    // receipted action (sandbox_order.repair) has already succeeded — exactly the
+    // class of failure the try/catch in runSupplierDisruption must turn into an honest
+    // "cannot_commit" rather than an uncaught exception that leaves the case stuck at
+    // "evaluating" (the Critical bug this test guards against).
+    await testDb.outboxMessage.deleteMany({ where: { caseId: dealCase.id, messageType: "backed_promise" } });
+
+    const result = await runSupplierDisruption(testDb, gateway, { caseId: dealCase.id, disruptedSupplierId: "VEND-2003", modelId: "fake-model-v1", timeoutMs: 2000, traceId: "t3" });
+
+    expect(result.status).toBe("cannot_commit");
+    if (result.status !== "cannot_commit") throw new Error("expected cannot_commit");
+    // Class B (partial repair): the reservation-commit loop and the first repair
+    // receipted action already produced real, irreversible side effects before the
+    // second receipted action's precondition failed.
+    expect(result.partialRepair).toBe(true);
+    expect(result.receiptedActionsExecuted).toEqual(["sandbox_order.repair"]);
+    expect(result.committedReservationIds.length).toBeGreaterThan(0);
+    expect(result.reason).toMatch(/^PARTIAL_REPAIR:/);
+
+    const reloaded = await testDb.dealCase.findUniqueOrThrow({ where: { id: dealCase.id } });
+    // The case reached the one legal exit from "evaluating" instead of being stuck there.
+    expect(reloaded.status).toBe("cannot_commit");
+
+    const freshlyCommitted = await testDb.reservation.findMany({ where: { caseId: dealCase.id, caseVersion: reloaded.activeTermsVersion, status: "committed" } });
+    expect(freshlyCommitted.map((r) => r.id).sort()).toEqual([...result.committedReservationIds].sort());
+
+    const events = await testDb.caseEvent.findMany({ where: { caseId: dealCase.id } });
+    expect(events.some((e) => e.eventType === "case.escalated")).toBe(false);
+    const cannotCommitEvent = events.find((e) => e.eventType === "case.cannot_commit");
+    if (!cannotCommitEvent) throw new Error("expected a case.cannot_commit event");
+    const payload = fromJsonColumn<{ partialRepair: boolean; committedReservationIds: string[]; receiptedActionsExecuted: string[] }>(cannotCommitEvent.payload);
+    expect(payload.partialRepair).toBe(true);
+    expect(payload.committedReservationIds.length).toBeGreaterThan(0);
+    expect(payload.receiptedActionsExecuted).toEqual(["sandbox_order.repair"]);
   });
 });
