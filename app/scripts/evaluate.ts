@@ -47,6 +47,13 @@ const SUBMISSION_DIR = path.resolve(__dirname, "..", "submission");
 // same gateway for all three fixtures keeps this a single, repeatable regression
 // harness rather than mixing a live-inference path into it.
 async function runOnce(fixture: FixtureDefinition, runIndex: number): Promise<RunRecord> {
+  // Known limitation, not fixed here: seedFixture() unconditionally create()s fresh
+  // Company/Customer rows every call with no reset (unlike its own documented
+  // mitigation for InventoryPosition/SupplierOption). This script calls seedFixture 30
+  // times per invocation and is meant to be re-run repeatedly against the shared
+  // prisma/dev.db, so repeated `npm run evaluate` runs accumulate orphaned
+  // Company/Customer rows there over time. A full fix would need a corresponding
+  // natural-key reset/cleanup inside seedFixture.ts itself — out of scope here.
   const { dealCase } = await seedFixture(db, fixture);
   const script = buildEvaluationScript({ supplierTtlSeconds: fixture.fixtureId === "CASE-STALE-SUPPLIER-HOLD" ? 0 : 900 });
   const gateway = new RecordingModelGateway(new FakeModelGateway(script));
@@ -67,7 +74,11 @@ async function runOnce(fixture: FixtureDefinition, runIndex: number): Promise<Ru
   // All three fixtures start at NET_60 (see fixtures/definitions.ts's shared
   // INITIAL_TERMS), so runDealSubmitted always routes to "negotiating" first — mirroring
   // the exact sequencing already proven in dealSubmitted.test.ts / buyerResponse.test.ts
-  // / supplierDisrupted.test.ts / staleSupplierHold.test.ts.
+  // / supplierDisrupted.test.ts / staleSupplierHold.test.ts. Assumption: committedAtMs
+  // is only ever set below, inside this branch. That's correct for all 3 current
+  // fixtures, but a future fixture whose initial terms committed directly (without ever
+  // negotiating) would silently leave committedAtMs: null despite
+  // actualTerminalState === "committed" — worth remembering if a new fixture is added.
   if (submitted.status === "negotiating") {
     const accepted = await runBuyerResponse(db, gateway, {
       buyerToken: submitted.buyerToken,
@@ -105,6 +116,10 @@ async function runOnce(fixture: FixtureDefinition, runIndex: number): Promise<Ru
   const decisions = decisionRows.map((row) => ({ decision: row.decision, evidenceRefsCount: fromJsonColumn<string[]>(row.evidenceRefs).length }));
 
   const trajectory = [...gateway.calls];
+  // No-op today: `gateway` is a fresh RecordingModelGateway constructed at the top of
+  // this same runOnce() call, so there is nothing accumulated for reset() to clear.
+  // Kept anyway as a defensive habit in case a future refactor starts reusing one
+  // gateway instance across multiple runs.
   gateway.reset();
 
   return {

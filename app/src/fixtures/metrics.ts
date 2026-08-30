@@ -42,13 +42,23 @@ export function taskSuccessRate(runs: RunRecord[]): number {
 // successive actual calls are matched positionally to that role's successive
 // canonical-stage appearances, in trajectory order. Shared by toolCallAccuracy and
 // trajectoryMatchRate so both metrics group a run's calls into stages identically.
+// Also reports (via `hasLeftoverCalls`) whether any role made MORE actual calls than
+// the canonical trajectory ever has stage-appearances for that role — i.e. calls that
+// couldn't be assigned to any stage at all. trajectoryMatchRate treats that as a
+// run-level anomaly (a duplicate/extra invocation); toolCallAccuracy, being a per-turn
+// metric over canonical-call turns only, doesn't consume this flag.
 interface AlignedStage {
   stage: CanonicalStage;
   actualRoles: Set<RoleId>;
   actualCallsByRole: Partial<Record<RoleId, RecordedRoleCall>>;
 }
 
-function alignRunToStages(trajectory: CanonicalTrajectory, calls: RecordedRoleCall[]): AlignedStage[] {
+interface AlignmentResult {
+  stages: AlignedStage[];
+  hasLeftoverCalls: boolean;
+}
+
+function alignRunToStages(trajectory: CanonicalTrajectory, calls: RecordedRoleCall[]): AlignmentResult {
   const queues = new Map<RoleId, RecordedRoleCall[]>();
   for (const call of calls) {
     const queue = queues.get(call.role) ?? [];
@@ -57,7 +67,7 @@ function alignRunToStages(trajectory: CanonicalTrajectory, calls: RecordedRoleCa
   }
   const pointers = new Map<RoleId, number>();
 
-  return trajectory.stages.map((stage) => {
+  const stages = trajectory.stages.map((stage) => {
     const actualRoles = new Set<RoleId>();
     const actualCallsByRole: Partial<Record<RoleId, RecordedRoleCall>> = {};
     for (const role of stage.roles) {
@@ -72,6 +82,16 @@ function alignRunToStages(trajectory: CanonicalTrajectory, calls: RecordedRoleCa
     }
     return { stage, actualRoles, actualCallsByRole };
   });
+
+  let hasLeftoverCalls = false;
+  for (const [role, queue] of queues) {
+    if ((pointers.get(role) ?? 0) < queue.length) {
+      hasLeftoverCalls = true;
+      break;
+    }
+  }
+
+  return { stages, hasLeftoverCalls };
 }
 
 function toolCallMatches(actual: RecordedRoleCall | undefined, expected: { name: string; resourceArgKey: string; resourceArgValue: unknown }): boolean {
@@ -92,7 +112,7 @@ export function toolCallAccuracy(runs: RunRecord[], trajectories: CanonicalTraje
     const trajectory = trajectories.find((t) => t.fixtureId === run.fixtureId);
     if (!trajectory) continue;
     const aligned = alignRunToStages(trajectory, run.trajectory);
-    for (const { stage, actualCallsByRole } of aligned) {
+    for (const { stage, actualCallsByRole } of aligned.stages) {
       for (const role of Object.keys(stage.expectedToolCalls) as RoleId[]) {
         const expected = stage.expectedToolCalls[role];
         if (!expected) continue;
@@ -104,11 +124,27 @@ export function toolCallAccuracy(runs: RunRecord[], trajectories: CanonicalTraje
   return total === 0 ? 0 : matches / total;
 }
 
-// Fraction of runs (not turns) where every stage's actual role-set equals the
-// canonical role-set for that stage (order-independent within a stage, since stage-2
-// roles run concurrently by design) AND every role's actual tool call matches
-// canonical, for every stage. Runs whose fixtureId has no canonical trajectory
-// defined are excluded from the denominator (there is nothing to compare against).
+// Fraction of runs (not turns) where, for every stage: (1) the actual role-set equals
+// the canonical role-set for that stage (order-independent within a stage, since
+// stage-2 roles run concurrently by design); (2) every role WITH a canonical expected
+// tool call made a matching actual call; (3) for a stage with exactly one role and no
+// expectedToolCalls entry for it (e.g. a sales-only or risk-only stage — the only
+// stage shape in this codebase's canonical trajectories where a role is provably never
+// expected to call any tool at all, anywhere), that role made no tool call either (it
+// exceeding its authority is a mismatch, not a silent pass). This check is
+// deliberately restricted to single-role, entry-less stages: a *multi*-role stage
+// with no expectedToolCalls entries (e.g. the initial negotiating-pass stage, where
+// inventory/procurement/logistics still issue real tool calls per
+// evaluationScripts.ts even though the resulting holds are unchecked/later released)
+// or a role omitted from an otherwise-populated stage (e.g. `finance` during the
+// ADVANCE_30 stage — its only tool call has no resource-identity argument to check,
+// per canonicalTrajectories.ts's own comment) are known cases where a role can
+// legitimately call a tool without a canonical entry, so those are intentionally left
+// unchecked rather than guessed at. Separately, at the run level, no role may have
+// actual calls left over beyond what the canonical trajectory ever expected for it (a
+// duplicate/extra invocation is also a mismatch, not silently dropped). Runs whose
+// fixtureId has no canonical trajectory defined are excluded from the denominator
+// (there is nothing to compare against).
 export function trajectoryMatchRate(runs: RunRecord[], trajectories: CanonicalTrajectory[]): number {
   const comparable = runs.filter((run) => trajectories.some((t) => t.fixtureId === run.fixtureId));
   if (comparable.length === 0) return 0;
@@ -117,19 +153,28 @@ export function trajectoryMatchRate(runs: RunRecord[], trajectories: CanonicalTr
   for (const run of comparable) {
     const trajectory = trajectories.find((t) => t.fixtureId === run.fixtureId)!;
     const aligned = alignRunToStages(trajectory, run.trajectory);
-    const runMatches = aligned.every(({ stage, actualRoles, actualCallsByRole }) => {
-      const expectedRoles = new Set(stage.roles);
-      if (expectedRoles.size !== actualRoles.size) return false;
-      for (const role of expectedRoles) {
-        if (!actualRoles.has(role)) return false;
-      }
-      for (const role of Object.keys(stage.expectedToolCalls) as RoleId[]) {
-        const expected = stage.expectedToolCalls[role];
-        if (!expected) continue;
-        if (!toolCallMatches(actualCallsByRole[role], expected)) return false;
-      }
-      return true;
-    });
+    const runMatches =
+      !aligned.hasLeftoverCalls &&
+      aligned.stages.every(({ stage, actualRoles, actualCallsByRole }) => {
+        const expectedRoles = new Set(stage.roles);
+        if (expectedRoles.size !== actualRoles.size) return false;
+        for (const role of expectedRoles) {
+          if (!actualRoles.has(role)) return false;
+        }
+        const soleRoleNeverCallsHere = stage.roles.length === 1 && Object.keys(stage.expectedToolCalls).length === 0;
+        for (const role of stage.roles) {
+          const expected = stage.expectedToolCalls[role];
+          const actual = actualCallsByRole[role];
+          if (expected) {
+            if (!toolCallMatches(actual, expected)) return false;
+          } else if (soleRoleNeverCallsHere && actual?.toolCallName != null) {
+            // This stage's only role has no canonical expected tool call, so any
+            // actual tool call it made here exceeds its authority — a mismatch.
+            return false;
+          }
+        }
+        return true;
+      });
     if (runMatches) matching += 1;
   }
   return matching / comparable.length;

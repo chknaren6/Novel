@@ -152,6 +152,39 @@ describe("trajectoryMatchRate", () => {
     ];
     expect(trajectoryMatchRate(runs, [TEST_TRAJECTORY])).toBe(0);
   });
+
+  it("fails a run where a role with no canonical tool call makes one anyway (exceeds its authority)", () => {
+    const runs: RunRecord[] = [
+      baseRun({
+        fixtureId: "TEST-FIXTURE",
+        trajectory: [
+          // sales has expectedToolCalls: {} for this stage, but calls a mutation tool
+          // anyway — this must NOT be silently treated as a match.
+          call("sales", "hold_inventory", { warehouseId: "WH-BLR" }),
+          call("inventory", "hold_inventory", { warehouseId: "WH-BLR" }),
+          call("procurement", "hold_supplier_option", { supplierId: "VEND-2003" }),
+        ],
+      }),
+    ];
+    expect(trajectoryMatchRate(runs, [TEST_TRAJECTORY])).toBe(0);
+  });
+
+  it("fails a run where a role makes a duplicate/extra call beyond what canonical ever expects", () => {
+    const runs: RunRecord[] = [
+      baseRun({
+        fixtureId: "TEST-FIXTURE",
+        trajectory: [
+          call("sales", null, null),
+          call("inventory", "hold_inventory", { warehouseId: "WH-BLR" }),
+          call("procurement", "hold_supplier_option", { supplierId: "VEND-2003" }),
+          // procurement only ever appears once in TEST_TRAJECTORY's stages, so this
+          // second call is unconsumed — it must not be silently dropped.
+          call("procurement", "hold_supplier_option", { supplierId: "VEND-BOGUS" }),
+        ],
+      }),
+    ];
+    expect(trajectoryMatchRate(runs, [TEST_TRAJECTORY])).toBe(0);
+  });
 });
 
 describe("latencyPercentile", () => {
