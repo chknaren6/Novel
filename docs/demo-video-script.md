@@ -1,64 +1,75 @@
-# Novel demo video script
+# Novel — 3-minute demo video script
 
-**Target length:** ~2:35. **Format:** screen recording of the `/market` flow in two browser tabs (operator + buyer), with voiceover recorded live or dubbed after.
+**Target length:** 3:00. **Format:** local screen recording, three browser tabs, voiceover live or dubbed after. Covers both real flows: the B2C Marketplace and the B2B Commitment Desk.
 
 ## Before you record
 
-1. Seed one `SupplierOption` row for the SKU you'll type in the demo (e.g. via Prisma Studio: `supplierId: "VEND-A"`, `sku: "SKU-COPPER-4MM"`, `availableQuantity: 1000`, `unitCostMinor: 10000`, `leadDays: 10`, `optionTtlSeconds: 900`, `status: "available"`).
-2. Set real env vars (`OPENAI_API_KEY`, `OPENAI_MODEL_ID`, `BUYER_LINK_SIGNING_SECRET`, `APP_BASE_URL`, `DATABASE_URL`/Supabase vars) and confirm `npm run dev` boots clean.
-3. Log in as the operator once before recording so the login screen doesn't eat runtime (or record it — see the optional cold-open below).
-4. Have two browser windows/tabs positioned: **Tab A** = operator `/market`, **Tab B** = ready to paste the buyer link.
-5. Do one full dry run first. The negotiation-brief call is a real LLM request — timing will vary a few seconds run to run.
+1. **Recording mode for reliability:** run the Commitment Desk half with `DESK_MODEL_MODE=demo npm run dev` — same real backend/UI code, but the six-role reveal uses honest, test-verified scripted answers instead of a live LLM call, so timing in this script is exact and repeatable. If your `OPENAI_API_KEY` is working by record day, you can run live instead — just expect the six-role wait to vary a few seconds and adjust the cut points in **1:35–2:35** accordingly.
+2. Reseed clean demo data right before recording so case IDs/status are fresh: `npm run seed:b2c-demo` and `npm run seed:b2b-demo`.
+3. Log in once before recording so the login screen doesn't eat runtime (auth only gates the app when Supabase env vars are set — skip if they're not).
+4. Have three browser tabs positioned:
+   - **Tab A** — `/market` (B2C operator view)
+   - **Tab B** — ready to paste the B2C buyer link
+   - **Tab C** — `/desk` (B2B Commitment Desk)
+5. Do one full dry run first. The B2C negotiation brief is a real LLM call even in demo mode (only the desk's six roles are scripted) — its timing will vary a few seconds run to run.
 
 ---
 
 ## Script
 
-**[0:00–0:10] Hook**
-Screen: title card or the pitch deck's opening slide (Novel / "Never promise what you have not reserved.")
-> "Every business promise made before the facts agree becomes a fire drill. Novel makes sure that never happens — starting with how buyers and suppliers actually make deals."
+**[0:00–0:15] Hook**
+Screen: title card / pitch deck opening slide — "Novel — Never promise what you have not reserved."
+> "Every business promise made before the facts agree becomes a fire drill. Novel is an agentic commitment layer for B2B trade — it won't let you promise something until it's actually been reserved. I'll show you both sides of it: buyers finding suppliers, and a company's own ERP data running through a six-agent check."
 
-**[0:10–0:20] Setup**
+**[0:15–0:25] B2C setup**
 Screen: Tab A, `/market`, empty composer.
-> "This is Novel's B2C marketplace. A buyer just tells us what they need — no forms, no dropdowns."
+> "First, the marketplace. A buyer just tells us what they need — no forms, no dropdowns."
 
-**[0:20–0:35] Intake**
-Action: type into the raw-request box — *"Need 500 metres of 4mm copper wire, delivery by 15 September, Bangalore"* — type the SKU you seeded, click **Find suppliers**.
-> "I paste the requirement, give it a SKU, and Novel parses it and checks it against the live supplier network in real time."
+**[0:25–0:40] Intake → candidates**
+Action: type the request (e.g. *"Need 500 metres of 4mm copper wire, delivery by 15 September, Bangalore"*), type the seeded SKU, click **Find suppliers**; ranked list appears.
+> "Novel parses that, checks it against the live supplier network, and ranks who can actually fulfill it — today, not eventually." *(click Choose on one)*
 
-**[0:35–0:50] Candidates**
-Screen: ranked supplier list appears.
-> "Here are the real suppliers who can fulfill this order today, ranked by cost and lead time." *(click Choose on one)*
+**[0:40–0:55] Negotiation brief**
+Screen: brief appears — market note, opening price, walk-away price, levers.
+> "Before I talk to the supplier, an AI-prepared brief gives me the market range and a walk-away price. It doesn't negotiate for me — it makes sure I walk in prepared."
 
-**[0:50–1:10] Negotiation brief**
-Screen: brief appears — market note, suggested opening price, walk-away price, levers.
-> "Before I ever talk to the supplier, an AI-prepared negotiation brief gives me the market range, a suggested opening price, a walk-away price, and real levers to use. The AI doesn't negotiate on its own — it makes sure I walk in prepared."
+**[0:55–1:10] Confirm, send, and commit**
+Action: enter negotiated price and buyer details, click **Confirm and send**; switch to Tab B, paste the buyer link, click **Accept**; cut back to Tab A updating live to "committed" with no refresh.
+> "I send a secure buyer link — no account needed on their end. They accept, and back on my side the case updates to committed on its own. That's a real Commit Certificate: the supplier commits first, the certificate is the last thing created, not the first."
 
-**[1:10–1:30] Confirm and send**
-Action: enter the negotiated price, buyer name and phone, click **Confirm and send quote to buyer**.
-> "I enter the price I actually negotiated and the buyer's details. Novel generates a secure, signed link for the buyer — no account needed on their end."
+**[1:10–1:20] Turn to B2B**
+Screen: cut to Tab C, `/desk` inbox — three pending cases listed.
+> "That's the buyer-facing half. The other half is the Commitment Desk — the same discipline applied inside one company's own ERP data."
 
-**[1:30–1:45] Live progress**
-Screen: the progress view — "awaiting_buyer_response", sell price, buyer link.
-> "And now I watch it live. This is polling the real backend — not a demo timer."
+**[1:20–1:35] Open a case**
+Action: click into the "committed"-bound case (Sundara Electricals / Aravali Electricals).
+> "Every pending deal sits here. I open one, and instead of a person manually checking credit, stock, suppliers, and freight, six agents do it — in parallel — before anything is promised."
 
-**[1:45–2:05] Buyer accepts**
-Action: switch to Tab B, paste the buyer link, click **Accept**.
-> "In a second tab, that's the buyer's link. They review the quote and accept."
+**[1:35–2:05] The six-role run**
+Action: click **Check and commit**; diagram view plays: Sales reads the request, then Finance / Inventory / Procurement / Logistics run together, then Risk, then the Coordinator; hover one or two nodes to show the tooltip reasoning.
+> "Sales normalizes the request. Then finance, inventory, procurement, and logistics check in parallel — each one holds a real reservation, not just an opinion. Risk reviews everyone's evidence last. Nothing here is a status I can fake — hover any box and you see exactly why it decided what it decided, straight from that role's own record."
 
-**[2:05–2:20] Committed**
-Action: switch back to Tab A — without refreshing — and let it update to "committed" on its own.
-> "Back on my side, without touching refresh, the case updates to committed. That's a real Commit Certificate, backed by an actual supplier commitment — not a status flag someone can fake."
+**[2:05–2:15] Certificate issued**
+Screen: settled state — "Committed — certificate issued," certificate id visible.
+> "Six for six — a certificate is issued, the same kind of dated, backed promise as the marketplace side."
 
-**[2:20–2:35] Close**
-Screen: hold on the committed state, or cut to the deck's closing slide.
-> "One promise, dated and certified. The supplier commits first — the certificate is the last thing created, not the first. That's Novel."
+**[2:15–2:40] The other two outcomes**
+Action: back to inbox, open the "negotiating" case, run it — show the finance counterterm and buyer link; back to inbox, open the "cannot_commit" case, run it — show the real failure reason.
+> "Not every deal clears cleanly. Here, finance counters with a 30% advance instead of a straight veto — Novel sends that back as a real counteroffer with its own buyer link. And here, there's simply no supplier coverage for the shortfall — Novel says so plainly instead of promising a date it can't hold."
+
+**[2:40–2:50] Same protocol, one product**
+Screen: split or quick cut between the market page and the desk diagram.
+> "Two very different-looking screens, buyers on one side, a company's own operators on the other — running on the exact same rule: nothing is promised until it's actually reserved."
+
+**[2:50–3:00] Close**
+Screen: hold on the desk's committed state, or cut to the deck's closing slide.
+> "One commitment layer. Real holds, real certificates, real no's when the answer is no. That's Novel."
 
 ---
 
-## Optional: B2B mention (10s add-on, if you want judges to know it's bigger than one flow)
+## Cut list if you're over time
 
-Insert after the hook, before "Setup":
-> "The same protocol runs a second flow today: a six-agent commitment desk that evaluates a company's own ERP data and returns a certificate, a counteroffer, or a clean no-commit. That one's screen isn't public yet — this demo is the buyer-facing half."
-
-Only use this line if the B2B backend is something you're prepared to speak to if asked — it's real and tested, but has no UI in this build yet.
+Trim in this order — each cut loses the least narrative weight first:
+1. Drop the tooltip hover beat in **1:35–2:05** (saves ~5s).
+2. Cut the cannot_commit case in **2:15–2:40**, keep only negotiating (saves ~10s).
+3. Merge **2:40–2:50** into the close line (saves ~10s).
