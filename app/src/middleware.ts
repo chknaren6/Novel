@@ -7,6 +7,12 @@ import { NextResponse, type NextRequest } from "next/server";
 // logged-in operator (single-operator MVP: whoever is logged in sees everything).
 const PUBLIC_MARKET_PATH = /^\/market\/[^/]+\/accept/;
 
+// Same idea for B2B: the customer-facing counteroffer response page authenticates via
+// the signed buyer token in the URL (runB2BCounterofferResponse / hashBuyerToken), not a
+// Supabase account, so it must stay public. Every other /desk route is the operator's
+// Commitment Desk and requires a logged-in operator, same as /market.
+const PUBLIC_DESK_PATH = /^\/desk\/[^/]+\/respond/;
+
 export async function middleware(request: NextRequest) {
   // Supabase isn't configured yet for local MVP validation (no project/keys set up) —
   // skip auth entirely rather than crash every request on a missing env var. Once
@@ -44,8 +50,9 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
   const isProtectedMarketRoute = pathname.startsWith("/market") && !PUBLIC_MARKET_PATH.test(pathname);
+  const isProtectedDeskRoute = pathname.startsWith("/desk") && !PUBLIC_DESK_PATH.test(pathname);
 
-  if (isProtectedMarketRoute && !user) {
+  if ((isProtectedMarketRoute || isProtectedDeskRoute) && !user) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);
@@ -55,5 +62,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/market/:path*"],
+  matcher: ["/market/:path*", "/desk/:path*"],
 };
